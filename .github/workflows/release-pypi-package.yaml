@@ -1,0 +1,251 @@
+name: Release Python Package
+
+# Atomic Release Design
+# =====================
+# Steps are ordered from most reversible to least reversible:
+#
+#   1. Build & verify        - no external side effects
+#   2. Pre-flight check      - verify version is not already on PyPI
+#   3. Git push + tag        - reversible via force-push and tag deletion
+#   4. GitHub release        - reversible via `gh release delete`
+#   5. PyPI upload           - IRREVERSIBLE (version number consumed forever)
+#
+# Key design decisions:
+# - PyPI upload is LAST because it is the only truly irreversible step.
+#   All other steps can be automatically rolled back on failure.
+# - `git push --atomic` ensures branch and tag land together or not at all.
+# - Version tag is created TWICE: first after the version bump commit (so
+#   write-release-notes sees the correct tags[-1]), then deleted and recreated
+#   after rebasing on origin/main (so the tag points to the correct post-rebase
+#   commit, not a pre-rebase orphan).
+# - A pre-flight HTTP check to PyPI catches "file already exists" errors
+#   before any mutations begin.
+# - An automatic rollback step runs on failure and reverses completed
+#   mutation steps in reverse order.
+#
+# Rollback matrix:
+#   rebase fails     -> nothing to roll back (no external state changed)
+#   tag create fails -> nothing to roll back (local only)
+#   push fails       -> nothing to roll back (--atomic means nothing landed)
+#   release fails    -> roll back: force-push main, delete remote tag
+#   PyPI fails       -> roll back: delete GitHub release, force-push main,
+#                       delete remote tag
+#   PyPI succeeds    -> no rollback possible; an error annotation is added
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "One of major, minor, or patch"
+        required: true
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+        default: patch
+  pull_request:
+    branches:
+      - '**'
+
+env:
+  UV_SYSTEM_PYTHON: 1
+  DEFAULT_VERSION_NAME: patch
+
+jobs:
+  deploy-package:
+    runs-on: ubuntu-latest
+    name: ${{ github.event_name == "pull_request" && "(Dry Run) " || "" }}Publish Python Package to PyPI
+    permissions:
+      id-token: write
+      contents: write
+
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Setup Pixi Environment
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: latest
+          cache: true
+          cache-write: ${{ github.event_name == "push" }}
+
+      - name: Set version name
+        run: echo "VERSION_NAME=${{ github.event.inputs.version_name || env.DEFAULT_VERSION_NAME }}" >> $GITHUB_ENV
+
+      - name: Get current version
+        run: echo "current_version=$(uv version --short)" >> $GITHUB_ENV
+
+      - name: Calculate new version number
+        run: |
+          CURRENT="${{ env.current_version }}"
+          BUMP_TYPE="${{ env.VERSION_NAME }}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          case "$BUMP_TYPE" in
+            major)
+              NEW_MAJOR=$((MAJOR + 1))
+              NEW_VERSION="$NEW_MAJOR.0.0"
+              ;;
+            minor)
+              NEW_MINOR=$((MINOR + 1))
+              NEW_VERSION="$MAJOR.$NEW_MINOR.0"
+              ;;
+            patch)
+              NEW_PATCH=$((PATCH + 1))
+              NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+              ;;
+            *)
+              echo "ERROR: Unknown bump type: $BUMP_TYPE"
+              exit 1
+              ;;
+          esac
+          echo "version_number=$NEW_VERSION" >> $GITHUB_ENV
+          echo "Current version: $CURRENT"
+          echo "Bump type: $BUMP_TYPE"
+          echo "New version: $NEW_VERSION"
+
+      - name: Display version information
+        run: |
+          echo "version_name: ${{ env.VERSION_NAME }}"
+          echo "current_version: ${{ env.current_version }}"
+          echo "new_version: ${{ env.version_number }}"
+
+      - name: Ensure repo status is clean
+        run: git status
+
+      - name: Configure Git
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+
+      - name: Bump version with uv
+        run: uv version --frozen --bump ${{ env.VERSION_NAME }}
+
+      - name: Commit version bump
+        run: |
+          git add pyproject.toml
+          git commit -m "Bump version to ${{ env.version_number }}"
+
+      - name: Create version tag
+        run: git tag -a "v${{ env.version_number }}" -m "Release version ${{ env.version_number }}"
+
+      # --- BUILD & VERIFY (no external side effects) ---
+
+      - name: Write release notes
+        if: ${{ github.event_name != "pull_request" }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          uv tool install llamabot[cli] --python 3.12 --python-preference only-managed --force
+          llamabot configure default-model --model-name="${{ secrets.DEFAULT_LANGUAGE_MODEL }}"
+          llamabot git write-release-notes
+
+      - name: Commit release notes
+        if: ${{ github.event_name != "pull_request" }}
+        run: |
+          uv tool install pre-commit
+          pre-commit run --all-files || pre-commit run --all-files
+          git add .
+          git commit -m "Add release notes for ${{ env.version_number }}"
+
+      - name: Build package
+        run: uv build --sdist --wheel
+
+      # --- PRE-FLIGHT CHECK ---
+
+      - name: Check if version already exists on PyPI
+        if: ${{ github.event_name != "pull_request" }}
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/trip-planner/${{ env.version_number }}/json")
+          if [ "$HTTP_CODE" == "200" ]; then
+            echo "::error::Version ${{ env.version_number }} already exists on PyPI. Cannot re-release."
+            exit 1
+          fi
+          echo "Version ${{ env.version_number }} does not exist on PyPI"
+
+      # --- MUTATIONS (ordered by reversibility: most reversible first) ---
+
+      - name: Capture pre-push state
+        if: ${{ github.event_name != "pull_request" }}
+        id: pre_push_state
+        run: |
+          git fetch origin main
+          echo "sha=$(git rev-parse origin/main)" >> $GITHUB_OUTPUT
+          echo "Pre-push origin/main SHA: $(git rev-parse origin/main)"
+
+      - name: Rebase on origin/main and retag
+        if: ${{ github.event_name != "pull_request" }}
+        id: rebase
+        run: |
+          if ! git rebase origin/main; then
+            echo "ERROR: Rebase failed - conflicts with concurrent changes"
+            git status
+            git log --oneline -5
+            exit 1
+          fi
+          git tag -d "v${{ env.version_number }}" || true
+          git tag -a "v${{ env.version_number }}" -m "Release version ${{ env.version_number }}"
+
+      - name: Atomic push (branch + tag)
+        if: ${{ github.event_name != "pull_request" }}
+        id: git_push
+        run: git push --atomic origin main "refs/tags/v${{ env.version_number }}"
+
+      - name: Create release in GitHub repo
+        if: ${{ github.event_name != "pull_request" }}
+        id: create_release
+        uses: ncipollo/release-action@v1
+        with:
+          bodyFile: "docs/releases/v${{ env.version_number }}.md"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: v${{ env.version_number }}
+
+      - name: Publish package (trusted publishing)
+        if: ${{ github.event_name != "pull_request" }}
+        id: pypi_publish
+        run: uv publish --trusted-publishing always
+
+      - name: Ensure complete
+        if: ${{ github.event_name != "pull_request" }}
+        run: echo "Auto-release complete!"
+
+      # --- ROLLBACK (runs on any failure during mutation steps) ---
+
+      - name: Rollback on failure
+        if: ${{ failure() && github.event_name != "pull_request" }}
+        run: |
+          echo "::error::Release failed! Attempting automatic rollback..."
+          VERSION="v${{ env.version_number }}"
+          PRE_PUSH_SHA="${{ steps.pre_push_state.outputs.sha }}"
+
+          if [ "${{ steps.create_release.outcome }}" == "success" ]; then
+            echo "Rolling back: deleting GitHub release $VERSION..."
+            gh release delete "$VERSION" --yes || echo "::warning::Failed to delete GitHub release"
+          fi
+
+          if [ "${{ steps.git_push.outcome }}" == "success" ]; then
+            echo "Rolling back: removing tag and force-pushing main to $PRE_PUSH_SHA..."
+            git push --delete origin "$VERSION" 2>/dev/null || echo "::warning::Failed to delete remote tag"
+            git push --force origin "$PRE_PUSH_SHA:refs/heads/main" || echo "::warning::Failed to force-push main"
+          fi
+
+          if [ "${{ steps.pypi_publish.outcome }}" == "success" ]; then
+            echo "::error::CRITICAL: PyPI upload succeeded before failure. $VERSION is permanently on PyPI and cannot be removed. You may need to yank it."
+          fi
+
+          echo "Rollback complete. Review warnings above."
