@@ -1,0 +1,275 @@
+# Conversational Trip Companion Specifications
+
+**Related LLD**: [Conversational Trip Companion — Low-Level Design](../llds/trip-companion.md)
+**Last updated**: 2026-09-02
+
+Feature prefixes used in this file:
+
+- `PLC`: destination-neutral saved places and external links
+- `TRIP`: shared-trip lifecycle and persistence
+- `ACT`: Custom GPT Action contracts and behavior
+- `OPT`: itinerary optimization proposals
+- `COND`: live and forecast condition data
+- `REC`: recommendation scoring and location assistance
+- `EXP`: saved-place Ideas view and favorites
+- `PLAN`: itinerary planning
+- `APP`: application shell and visual interface
+- `PWA`: installation, caching, and offline behavior
+- `SEC`: security and privacy
+- `OPS`: repository workflow and deployment
+
+`[x]` marks behavior already covered by traced tests and code. `[ ]` marks an
+active gap introduced or changed by the approved conversational design.
+
+## Destination-Neutral Places
+
+- [ ] **PLC-DATA-001**: Each place saved inside a schema-version-two trip shall conform to the approved destination-neutral place model.
+- [ ] **PLC-DATA-002**: Each saved place shall have a name containing 1–120 characters.
+- [ ] **PLC-DATA-003**: Each saved place coordinate pair shall be null or contain finite latitude and longitude values within geographic bounds.
+- [ ] **PLC-DATA-004**: Each saved place source URL shall be null or use HTTPS.
+- [ ] **PLC-DATA-005**: Each saved place shall remain valid without image data.
+- [ ] **PLC-DATA-006**: Each saved place shall contain no more than ten unique lower-case tags of 1–30 characters each.
+- [ ] **PLC-DATA-007**: Each known saved-place duration shall be between 15 and 1,440 minutes inclusive.
+- [ ] **PLC-DATA-008**: Each newly saved place shall receive a server-assigned identifier.
+- [ ] **PLC-BE-001**: If a place-add request contains an invalid optional URL or coordinate pair, then the system shall save the otherwise valid place without that field.
+- [ ] **PLC-BE-002**: If the system discards invalid optional place data, then it shall return a warning identifying the discarded field.
+- [ ] **PLC-BE-003**: When a place-add request matches an existing normalized name and locality, the system shall return the existing place without creating another place.
+- [ ] **PLC-BE-004**: When the system returns an existing place for a duplicate place-add request, it shall include a duplicate warning.
+- [ ] **PLC-BE-005**: When the system presents a saved place, it shall derive Apple Maps and Google Maps search destinations from the place name, locality, and available coordinates.
+- [ ] **PLC-UI-001**: Each saved-place card shall display its name, locality when known, summary, and relevant tags without requiring an image.
+- [ ] **PLC-UI-002**: While a saved place has a source URL, its card shall provide a “Visit source” action.
+- [ ] **PLC-UI-003**: Each saved-place card shall provide Apple Maps and Google Maps actions.
+- [ ] **PLC-UI-004**: While a saved place has ChatGPT origin, its card shall identify that origin without claiming the place details are verified.
+- [ ] **PLC-UI-005**: While a saved place has no image, its card shall omit the image region rather than display an empty placeholder.
+
+## Shared-Trip Data and Browser API
+
+- [ ] **TRIP-DATA-001**: Each current shared-trip document shall conform to schema version two of the approved destination-neutral trip model.
+- [ ] **TRIP-DATA-002**: Each shared trip shall have a title containing 1–80 characters.
+- [ ] **TRIP-DATA-003**: When a shared trip is created without customized preferences, the system shall use balanced pace, standard mobility, maximum cost level 2, and outdoors, food, culture, and relaxing interests.
+- [ ] **TRIP-DATA-006**: Each itinerary item in a shared trip shall use a date inside that trip's date range.
+- [x] **TRIP-DATA-008**: Each shared trip shall expire at the later of 30 days after creation or 180 days after its end date.
+- [x] **TRIP-DATA-009**: When a shared trip is mutated, the system shall preserve its original absolute expiration time.
+- [ ] **TRIP-DATA-010**: Each persisted schema-version-two trip document shall exclude the raw share token, Action key, browser location, referrer, and client IP address.
+- [ ] **TRIP-DATA-011**: Each place identifier stored in a schema-version-two favorite or itinerary item shall resolve to a place embedded in that trip.
+- [ ] **TRIP-DATA-012**: Each schema-version-two trip shall retain no more than three plan proposals.
+- [ ] **TRIP-DATA-013**: When a schema-version-one trip is read, the system shall deterministically convert its known catalog and custom itinerary references into embedded schema-version-two places.
+- [ ] **TRIP-DATA-014**: When a schema-version-one trip is migrated, the system shall mark its existing itinerary items as confirmed.
+- [ ] **TRIP-DATA-015**: When a migrated trip next completes a successful mutation, the system shall persist it as schema version two without rotating its share link.
+- [ ] **TRIP-DATA-016**: If a schema-version-one place reference cannot be migrated, then the system shall retain an unavailable placeholder rather than discard the itinerary entry.
+- [ ] **TRIP-DATA-017**: Each shared trip shall have an inclusive date range of 1–31 days.
+- [ ] **TRIP-DATA-018**: Each shared trip shall have a destination name containing 1–120 characters.
+- [ ] **TRIP-API-001**: When a valid destination-neutral trip-creation request is received, the browser trip API shall return status 201 with a new share token and schema-version-two trip.
+- [ ] **TRIP-API-002**: When a valid share token identifies an unexpired trip, the browser trip API shall return status 200 with the current schema-version-two trip.
+- [ ] **TRIP-API-003**: When a valid browser semantic mutation targets the current trip version, the browser trip API shall return status 200 with the updated trip.
+- [x] **TRIP-API-004**: When a valid deletion confirmation targets an existing shared trip, the browser trip API shall permanently delete it and return status 204.
+- [x] **TRIP-API-005**: If a browser trip request has a missing or malformed bearer token, then the browser trip API shall return status 401 without accessing trip storage.
+- [x] **TRIP-API-006**: If a valid share token does not identify an unexpired trip, then the browser trip API shall return status 404.
+- [ ] **TRIP-API-007**: If a browser trip request contains an invalid body, unknown field, or unresolved embedded-place reference, then the browser trip API shall return status 400 with a non-retryable error.
+- [x] **TRIP-API-008**: The browser trip API shall mark every response as non-cacheable by shared and browser HTTP caches.
+- [x] **TRIP-API-009**: If trip storage is unavailable, then the browser trip API shall return status 503 with a retryable error.
+- [x] **TRIP-API-010**: If one hashed client address creates more than 10 trips within one hour, then the browser trip API shall reject subsequent creations with status 429 until that window expires.
+- [x] **TRIP-API-011**: If one hashed token-and-client pair reads a trip more than 120 times within one minute, then the browser trip API shall reject subsequent reads with status 429 until that window expires.
+- [x] **TRIP-API-012**: If one hashed token-and-client pair mutates a trip more than 60 times within one minute, then the browser trip API shall reject subsequent mutations with status 429 until that window expires.
+- [x] **TRIP-BE-001**: When the system creates a shared trip, it shall generate a URL-safe token containing 128 bits of cryptographic randomness.
+- [x] **TRIP-BE-002**: When the system identifies a persisted shared trip, it shall use a cryptographic hash of the share token rather than the raw token.
+- [ ] **TRIP-BE-003**: When either the browser or Action trip API receives a previously applied mutation identifier, it shall return the current result without applying the mutation again.
+- [ ] **TRIP-BE-004**: When either the browser or Action trip API commits a mutation, it shall atomically verify the expected version and increment the trip version.
+- [ ] **TRIP-BE-005**: If either the browser or Action trip API receives a mutation for a stale trip version, then it shall return status 409 without applying that mutation.
+- [x] **TRIP-BE-006**: When the browser receives its first version conflict for a semantic mutation, it shall reapply that mutation to the latest trip and retry once.
+- [x] **TRIP-BE-007**: If the retried browser mutation conflicts again, then the browser shall preserve the user's draft and require a refresh before another submission.
+- [x] **TRIP-BE-008**: When a shared trip adds an existing favorite or removes an absent favorite, the operation shall succeed without duplicating or failing the favorite state.
+- [x] **TRIP-UI-001**: Before creating a shared trip, the onboarding interface shall explain that anyone holding its private link can view, edit, and delete the trip.
+- [ ] **TRIP-UI-002**: The destination-neutral onboarding interface shall collect a trip title, date range, destination name, preferences, and optional home base.
+- [x] **TRIP-UI-003**: When a shared trip is successfully created, the system shall navigate to `/trip` with the share token in the URL fragment.
+- [x] **TRIP-UI-004**: When a user shares a trip, the system shall use native device sharing when available and otherwise provide a clipboard-copy action.
+- [ ] **TRIP-UI-005**: The shared-trip interface shall provide a “Copy link for ChatGPT” action that copies the existing private trip link.
+- [x] **TRIP-UI-006**: Before deleting a shared trip, the system shall require confirmation that deletion is permanent for everyone holding the link.
+- [ ] **TRIP-UI-007**: Before copying a private trip link for ChatGPT, the system shall explain that anyone holding the link can edit the trip.
+- [x] **TRIP-NAV-001**: When `/trip` loads with a valid share-token fragment, the browser shall authenticate trip API requests with that fragment only after hydration.
+- [x] **TRIP-NAV-002**: If `/trip` loads without a valid share-token fragment, then the browser shall avoid a trip API request and display actions to paste a complete link or create a trip.
+- [x] **TRIP-NAV-003**: If a shared trip is missing or expired, then the browser shall clear its matching local snapshot and display a recoverable not-found state.
+
+## Custom GPT Actions
+
+- [ ] **ACT-DATA-001**: The checked-in Custom GPT Action schema shall describe only the approved Action API operations and their accepted fields.
+- [ ] **ACT-DATA-002**: Each Custom GPT Action operation shall have a unique stable operation identifier.
+- [ ] **ACT-DATA-003**: Each Custom GPT Action operation shall have an explicit description of its purpose.
+- [ ] **ACT-DATA-004**: The checked-in Custom GPT instructions shall tell the GPT to request a private trip link when the conversation contains no trip token.
+- [ ] **ACT-DATA-005**: The checked-in Custom GPT instructions shall tell the GPT never to repeat a trip token in its response.
+- [ ] **ACT-DATA-006**: The checked-in Custom GPT instructions shall tell the GPT to retrieve current trip context before its first mutation.
+- [ ] **ACT-DATA-007**: The `applyPlanProposal` Action description shall permit invocation only after the user explicitly accepts the identified proposal.
+- [ ] **ACT-API-001**: When an Action request contains a valid Action API key and valid trip token in their approved headers, the Action API shall authenticate the request for that trip.
+- [ ] **ACT-API-002**: If an Action request has a missing or invalid Action API key, then the Action API shall return status 401 before inspecting the trip token.
+- [ ] **ACT-API-003**: If an Action request has a missing or malformed trip token, then the Action API shall return status 401 without accessing trip storage.
+- [ ] **ACT-API-004**: If a valid Action request identifies no unexpired trip, then the Action API shall return status 404 without revealing a storage identifier.
+- [ ] **ACT-API-005**: When `getTripContext` authenticates successfully, the Action API shall return concise trip metadata, destination, preferences, places, itinerary, latest pending proposal, and current version.
+- [ ] **ACT-API-006**: When `setTripDestination` receives valid destination data for the current version, the Action API shall persist that destination and return the updated destination.
+- [ ] **ACT-API-007**: When `addPlace` receives a valid place for the current version, the Action API shall persist one ChatGPT-origin place and return it.
+- [ ] **ACT-API-008**: When `updatePlace` receives valid allowlisted changes for an existing place at the current version, the Action API shall persist and return the updated place.
+- [ ] **ACT-API-009**: When `setTripPreferences` receives valid preferences for the current version, the Action API shall replace and return the trip preferences.
+- [ ] **ACT-API-010**: When `optimizeTrip` receives the current version, the Action API shall return the newly calculated pending proposal or an explanation that no proposal is useful.
+- [ ] **ACT-API-011**: When `applyPlanProposal` receives a valid current proposal for the current trip version, the Action API shall atomically apply that proposal and return the updated version.
+- [ ] **ACT-API-012**: The Custom GPT Action API shall expose no operation that deletes a trip.
+- [ ] **ACT-API-013**: Each successful Action response shall exclude the Action key, trip token, storage key, and raw condition-provider responses.
+- [ ] **ACT-API-014**: The Action API shall mark every response as non-cacheable by shared and browser HTTP caches.
+- [ ] **ACT-API-015**: If an Action request body exceeds 64 KiB or contains an unknown field, then the Action API shall return status 400 before mutating the trip.
+- [ ] **ACT-API-016**: If one hashed Action-key-and-trip-token pair reads a trip more than 60 times within one minute, then the Action API shall reject subsequent reads with status 429 until that window expires.
+- [ ] **ACT-API-017**: If one hashed Action-key-and-trip-token pair mutates a trip more than 30 times within one minute, then the Action API shall reject subsequent mutations with status 429 until that window expires.
+- [ ] **ACT-BE-001**: When an Action mutation succeeds, the system shall run the same schema validation, idempotency, concurrency, and persistence behavior used by browser mutations.
+- [ ] **ACT-BE-002**: If an Action mutation targets a stale trip version, then the system shall return status 409 with the current version and without guessing how to reapply the conversational request.
+- [ ] **ACT-BE-003**: When a valid Action place-add, place-update, destination-update, or preference-update mutation succeeds, the system shall recalculate the pending plan proposal before returning.
+
+## Optimization Proposals
+
+- [ ] **OPT-DATA-001**: Each pending plan proposal shall identify its base trip version, creation time, summary, status, and no more than ten explicit changes.
+- [ ] **OPT-DATA-002**: Each proposed change shall contain one deterministic rationale.
+- [ ] **OPT-BE-001**: When the optimizer evaluates a trip, it shall treat confirmed itinerary items as fixed constraints.
+- [ ] **OPT-BE-002**: When the optimizer creates a proposal, it shall limit changes to adding unscheduled places or moving and reordering tentative items.
+- [ ] **OPT-BE-003**: When saved-place coordinates are available, the optimizer shall use a stable nearest-next ordering for tentative items with equal scheduling eligibility.
+- [ ] **OPT-BE-004**: If a place lacks coordinates or condition data, then the optimizer shall use neutral values rather than exclude that place.
+- [ ] **OPT-BE-005**: The optimizer shall not infer opening hours, travel times, reservation availability, or booking availability.
+- [ ] **OPT-BE-006**: When the optimizer creates a pending proposal, the system shall mark every older pending proposal as superseded.
+- [ ] **OPT-BE-007**: If optimization produces no useful changes, then the system shall store no new pending proposal and return an explanatory message.
+- [ ] **OPT-BE-008**: When a current proposal is applied, the system shall atomically apply all of its changes as one versioned trip mutation.
+- [ ] **OPT-BE-009**: If a proposal's base version differs from the current trip version, then the system shall reject application with status 409.
+- [ ] **OPT-BE-010**: When two optimizer inputs are equal, the optimizer shall produce the same ordered proposal changes.
+- [ ] **OPT-BE-011**: When a pending proposal is dismissed, the system shall mark it dismissed without changing the itinerary.
+- [ ] **OPT-BE-012**: When a pending proposal is applied, the system shall mark it applied.
+- [ ] **OPT-BE-013**: When an applied proposal adds a place to the itinerary, the system shall mark the new itinerary item as tentative.
+- [ ] **OPT-UI-001**: While a pending proposal exists, the Plan view shall display its summary and every proposed change before application.
+- [ ] **OPT-UI-002**: While a pending proposal exists, the Plan view shall provide Apply and Dismiss controls.
+- [ ] **OPT-UI-003**: When a proposal becomes stale after another trip edit, the Plan view shall require regeneration rather than applying it.
+
+## Conditions
+
+- [ ] **COND-API-001**: When the destination-neutral conditions API receives valid destination coordinates without a target time, it shall return conditions for the current hour at those coordinates.
+- [ ] **COND-API-002**: When the destination-neutral conditions API receives valid coordinates without a time zone, it shall use the provider-resolved local time zone.
+- [ ] **COND-API-003**: When the destination-neutral conditions API receives valid coordinates, it shall return normalized weather and US AQI data for those coordinates.
+- [ ] **COND-API-004**: When the destination-neutral conditions request enables marine data, it shall return normalized marine data for the requested coordinates when available.
+- [ ] **COND-API-005**: When no saved place is coastal or water-contact, the client shall request destination conditions without marine data.
+- [ ] **COND-API-006**: If destination coordinates are unavailable, then the conditions adapter shall return unavailable status without contacting a provider.
+- [ ] **COND-API-007**: Each destination-neutral conditions response shall identify its requested time, fetch time, expiry time, coordinates, time zone, availability, and source.
+- [ ] **COND-API-008**: Each destination-neutral conditions response shall express temperatures in Fahrenheit, wind in miles per hour, air quality on the US AQI scale, and wave height in feet.
+- [x] **COND-API-009**: The public conditions API shall allow shared caching for 15 minutes and stale-while-revalidate use for one hour.
+- [x] **COND-API-010**: If any requested Open-Meteo condition group fails or times out after five seconds, then the conditions API shall return available groups with degraded status.
+- [x] **COND-API-011**: If every requested Open-Meteo condition group fails or times out after five seconds, then the conditions API shall return status 200 with unavailable condition data.
+- [x] **COND-API-012**: If the requested conditions target is outside the available forecast range, then the conditions API shall return status 200 with an unavailable `forecast-out-of-range` result.
+- [ ] **COND-API-013**: If destination coordinates or the conditions target are malformed, then the conditions API shall return status 400 without contacting Open-Meteo.
+- [x] **COND-API-014**: If one hashed client address requests conditions more than 120 times within one minute, then the conditions API shall reject subsequent requests with status 429 until that window expires.
+- [ ] **COND-UI-001**: While destination conditions are available, the Today view shall display local time, freshness, temperature, precipitation probability, wind, AQI, and UV values that are present.
+- [ ] **COND-UI-002**: While destination condition data is degraded, stale, or unavailable, the Today view shall label that state without hiding saved places or itinerary data.
+- [x] **COND-UI-003**: While marine data is displayed, the Today view shall state that coastal-model data is advisory and unsuitable for navigation.
+- [x] **COND-UI-004**: While a selected date is outside the forecast range, the Today view shall invite the user to refresh closer to that date.
+- [ ] **COND-UI-005**: While destination marine conditions are available, the Today view shall display sea-surface temperature, wave height, and wave period.
+- [x] **COND-UI-006**: The Today view shall provide controls for selecting the recommendation date and time.
+
+## Recommendations and Optional Location
+
+- [ ] **REC-BE-001**: When recommendations are requested for a schema-version-two trip, the system shall score every saved place on a 0–100 scale using preference, condition, time, and distance components.
+- [x] **REC-BE-002**: The recommendation preference component shall score no interests as 24 or matching interests as `min(35, 12 + 12 × matches)`, subtract 8 above the maximum cost, subtract 5 above the 180/300/480-minute relaxed/balanced/full pace target, and clamp to 0–35.
+- [x] **REC-BE-003**: The recommendation condition component shall use the approved indoor, outdoor, coastal, and mixed profile calculations and clamp the result to 0–30.
+- [x] **REC-BE-004**: The recommendation time component shall score a preferred daypart as 20, an adjacent daypart as 12, another daypart as 6, and an outdoor or coastal place after daylight as 2.
+- [x] **REC-BE-005**: The recommendation distance component shall use Haversine miles and score inclusive 2/5/10/20-mile bands as 15/12/8/4, farther places as 1, and a missing origin as 8.
+- [x] **REC-BE-006**: If condition data is unavailable, then the recommendation engine shall use a neutral condition score of 18.
+- [x] **REC-BE-007**: While condition data is partially available, the recommendation engine shall use neutral values for missing fields and score available fields.
+- [ ] **REC-BE-008**: When saved-place recommendation scores are equal, the recommendation engine shall sort by normalized place name and then place identifier.
+- [ ] **REC-BE-009**: When at least six saved-place recommendations exist, the Today view shall show the six highest-ranked places.
+- [x] **REC-BE-010**: Each displayed recommendation shall include no more than three plain-language reasons derived from its strongest positive score contributions.
+- [x] **REC-BE-011**: Each displayed recommendation shall include every material caution produced by its scoring penalties.
+- [x] **REC-BE-012**: The recommendation engine shall treat marine values as advisory suitability inputs rather than safety determinations.
+- [x] **REC-BE-013**: The outdoor condition score shall subtract 0/4/10/18 points for precipitation of 0–10%, above 10–30%, above 30–60%, and above 60%.
+- [x] **REC-BE-014**: The outdoor condition score shall subtract 2 points per started 5°F outside 60–82°F up to 10 points.
+- [x] **REC-BE-015**: The outdoor condition score shall subtract 0/4/10 points for wind of 0–15, above 15–25, and above 25 miles per hour.
+- [x] **REC-BE-016**: The outdoor condition score shall subtract 0/2/7/14 points for US AQI of 0–50, above 50–100, above 100–150, and above 150.
+- [x] **REC-BE-017**: The water-contact coastal condition score shall subtract 0/5/10 points for wave height of 0–4, above 4–6, and above 6 feet.
+- [x] **REC-BE-018**: The indoor condition score shall start at 24, add 2 points for each available adverse precipitation, temperature, wind, or AQI signal, and clamp to 30.
+- [x] **REC-BE-019**: The mixed-place condition score shall equal the rounded arithmetic mean of its indoor and outdoor condition scores.
+- [x] **REC-BE-020**: The recommendation daypart shall use sunset-relative golden-hour and evening boundaries when sunset is available and the approved fixed boundaries when it is unavailable.
+- [x] **REC-BE-021**: The recommendation daypart adjacency shall use the non-circular morning, midday, afternoon, golden-hour, and evening order.
+- [x] **REC-BE-022**: When a score applies a nonzero penalty, the recommendation shall emit the corresponding stable caution code.
+- [x] **REC-UI-001**: When a user explicitly requests location-based ranking, the system shall ask the browser for the device's current location.
+- [x] **REC-UI-002**: While device coordinates are available for recommendation ranking, the browser shall retain them only in memory and calculate distance locally.
+- [ ] **REC-UI-003**: If device location is denied, unavailable, or times out, then the system shall rank by the trip's home-base coordinates or the approved neutral distance when no home base exists.
+- [x] **REC-UI-004**: If a device-location request fails, then the system shall not prompt again without another explicit user gesture.
+- [x] **REC-UI-005**: While condition data is unavailable, the recommendation interface shall avoid claiming that ranking reflects live conditions.
+
+## Ideas, Favorites, and Planning
+
+- [ ] **EXP-UI-001**: The Ideas view shall search saved-place names, localities, summaries, and tags.
+- [ ] **EXP-UI-002**: The Ideas view shall filter saved places by interest, cost, duration, profile, accessibility, reservation recommendation, and favorite status.
+- [ ] **EXP-NAV-001**: When Ideas filters change, the system shall encode the filter state in URL search parameters.
+- [ ] **EXP-NAV-002**: When browser navigation changes Ideas search parameters, the system shall restore the represented filter state.
+- [ ] **EXP-UI-003**: When a user favorites or unfavorites a saved place while online, the system shall optimistically update the visible favorite state.
+- [x] **EXP-UI-004**: If a favorite mutation fails, then the system shall restore authoritative favorite state and display a retryable error when applicable.
+- [ ] **EXP-UI-005**: Each Ideas card shall provide actions to favorite, add to the itinerary, visit its optional source, and open directions.
+- [ ] **PLAN-UI-001**: The Plan view shall display one section for each date in the inclusive trip range.
+- [ ] **PLAN-UI-002**: While the trip range includes the current destination-local date, the Plan view shall visually identify that date.
+- [ ] **PLAN-UI-003**: While an itinerary day has no items, the Plan view shall display guidance for adding a saved place.
+- [ ] **PLAN-UI-004**: When a user adds a saved place to an itinerary day, the system shall create an itinerary item referencing that embedded place.
+- [ ] **PLAN-UI-005**: When a user confirms a tentative itinerary item, the system shall mark that item as confirmed.
+- [x] **PLAN-UI-006**: When a user edits or removes an itinerary item while online, the system shall optimistically update the visible itinerary.
+- [x] **PLAN-UI-007**: If an itinerary mutation fails, then the system shall restore authoritative itinerary state and preserve the user's unsaved form draft.
+- [x] **PLAN-UI-008**: The Plan view shall provide keyboard- and touch-operable move controls for reordering items within one day.
+- [x] **PLAN-UI-009**: The Plan view shall order timed items by start time and untimed items by their explicit day order.
+- [x] **PLAN-BE-001**: When an itinerary day is reordered, the system shall require every and only the current item identifiers for that day.
+- [x] **PLAN-BE-002**: If a trip date-range update would exclude existing itinerary items, then the system shall reject the update and identify the affected dates.
+- [x] **PLAN-BE-003**: If an itinerary mutation targets an item that does not exist, then the system shall reject the mutation without changing the trip.
+- [ ] **PLAN-UI-010**: When a user manually adds a saved place to an itinerary day, the system shall mark the new itinerary item as confirmed.
+
+## Application Shell and Accessibility
+
+- [ ] **APP-UI-001**: The phone trip workspace shall provide persistent Today, Ideas, and Plan navigation at the bottom of the viewport.
+- [ ] **APP-UI-002**: The wide-screen trip workspace shall provide Today, Ideas, and Plan navigation in a left-side rail.
+- [x] **APP-UI-003**: The trip companion shall remain usable without horizontal page scrolling at viewport widths of 375, 768, 1024, and 1440 CSS pixels.
+- [x] **APP-UI-004**: The trip companion shall provide touch targets of at least 44 by 44 CSS pixels for primary interactive controls.
+- [x] **APP-UI-005**: The trip companion shall provide visible keyboard focus, semantic labels, and WCAG AA color contrast for interactive content.
+- [x] **APP-UI-006**: While reduced motion is requested by the operating system, the trip companion shall suppress nonessential interface motion.
+- [x] **APP-UI-007**: The trip companion shall use a warm sand, deep navy, seafoam, and coral visual system.
+- [x] **APP-UI-008**: When a destructive or validation dialog opens, the system shall move focus into it and return focus to the invoking control when it closes.
+- [x] **APP-UI-009**: Each external link opened by the trip companion shall be protected from opener access and referrer disclosure.
+
+## PWA and Offline Behavior
+
+- [x] **PWA-PROC-001**: The deployed trip companion shall expose a valid installable web-app manifest and operate over HTTPS.
+- [ ] **PWA-PROC-002**: The trip companion service worker shall cache immutable application assets without requiring place images.
+- [x] **PWA-PROC-003**: The trip companion service worker shall use a network-first policy with cached fallback for navigations and public condition responses.
+- [ ] **PWA-PROC-004**: The trip companion service worker shall never cache authenticated browser trip API or Custom GPT Action API responses.
+- [ ] **PWA-DATA-001**: When a schema-version-two trip is fetched successfully, the browser shall validate and save an offline snapshot indexed by a hash-derived key that excludes the raw token.
+- [ ] **PWA-DATA-002**: If a persisted trip snapshot fails schema-version-two validation, then the browser shall delete it without rendering it.
+- [ ] **PWA-UI-001**: While the device is offline, the trip companion shall display the cached application shell and latest valid trip and condition snapshots when available.
+- [x] **PWA-UI-002**: While the device is offline, the trip companion shall label cached condition and trip data as stale.
+- [ ] **PWA-UI-003**: While the device is offline, the trip companion shall disable shared-trip mutations and label external links as requiring connectivity.
+- [x] **PWA-UI-004**: If browser persistence is unavailable or exceeds its quota, then the trip companion shall continue operating online without blocking the user.
+- [x] **PWA-UI-005**: When connectivity returns, the trip companion shall revalidate shared-trip and condition data.
+- [x] **PWA-UI-006**: When an application update is available while an edit form is dirty, the system shall defer activation until a later navigation.
+- [x] **PWA-PROC-005**: While a shared-trip workspace is visible and online, the browser shall revalidate trip data every 15 seconds and on window focus.
+- [x] **PWA-PROC-006**: While a shared-trip workspace is visible and online, the browser shall revalidate condition data every 15 minutes.
+
+## Security and Privacy
+
+- [x] **SEC-NAV-001**: During browser navigation, the share token shall appear only in the `/trip` URL fragment.
+- [x] **SEC-DATA-001**: The trip companion shall not persist the raw share token in cookies, browser storage, service-worker caches, or application logs.
+- [x] **SEC-DATA-002**: The trip companion shall not transmit or persist browser geolocation coordinates.
+- [ ] **SEC-DATA-003**: The trip companion shall render all user- and GPT-supplied text as text rather than executable markup.
+- [x] **SEC-DATA-004**: The trip companion shall store only cryptographic hashes of client addresses used for rate limiting.
+- [ ] **SEC-DATA-005**: The trip companion shall not write the Action key or Action trip token to application logs, analytics, browser persistence, or service-worker caches.
+- [ ] **SEC-DATA-006**: The production trip companion shall reject a configured Action key shorter than 32 bytes.
+- [x] **SEC-API-001**: The deployed trip companion shall send a content security policy that permits browser connections only to the application origin.
+- [x] **SEC-API-002**: The deployed trip companion shall send headers that deny framing, prevent MIME sniffing, suppress referrers, and restrict unnecessary browser permissions.
+- [ ] **SEC-API-003**: Both browser mutation routes and Action mutation routes shall reject request bodies larger than 64 KiB before parsing application data.
+- [ ] **SEC-API-005**: The Action API shall accept Action and trip credentials only in their approved request headers.
+- [ ] **SEC-API-006**: The trip companion shall not fetch a GPT-supplied place source URL from the server.
+- [x] **SEC-UI-001**: The trip companion shall include no analytics or third-party browser scripts in the initial release.
+
+## Repository Workflow and Deployment
+
+- [x] **OPS-PROC-001**: The repository shall require a Pixi version in the supported `>=0.69,<1` range.
+- [x] **OPS-PROC-002**: The repository shall provide Pixi tasks for web dependency installation, development, formatting, linting, type checking, Python tests, web tests, browser tests, production build, and preview deployment.
+- [x] **OPS-PROC-003**: The repository shall lock JavaScript dependencies for reproducible local and Vercel installations.
+- [x] **OPS-PROC-004**: The Vercel build shall use the repository root, the configured Node.js runtime, locked JavaScript dependencies, and standard framework output.
+- [ ] **OPS-PROC-005**: If required storage or Custom GPT Action variables are absent from production, then the affected trip APIs shall fail closed without exposing credentials or configuration values.
+- [x] **OPS-PROC-006**: When the preview-deployment task is run, the system shall create a Vercel preview rather than a production deployment.
+- [x] **OPS-PROC-007**: The repository workflow shall require explicit approval before initiating a production deployment.
+- [x] **OPS-PROC-008**: Before a preview is accepted, the repository workflow shall require successful formatting, linting, type checking, unit tests, integration tests, browser tests, accessibility checks, and a production build.
+- [ ] **OPS-PROC-009**: The initial Custom GPT Action release shall operate without an OpenAI API key or OpenAI SDK in the application.
