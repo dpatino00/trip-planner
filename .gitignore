@@ -19,7 +19,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -149,3 +148,11 @@ oryx-build-commands.txt
 .DS_Store
 docs/cli.md
 .pixi
+node_modules/
+coverage-web/
+playwright-report/
+test-results/
+.next/
+public/sw-prod.js
+public/sw-prod.js.map
+*.tsbuildinfo

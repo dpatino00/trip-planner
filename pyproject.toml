@@ -101,6 +101,7 @@ omit = [
 ]
 
 [tool.pixi.workspace]
+requires-pixi = ">=0.69,<1"
 channels = ["conda-forge"]
 platforms = ["osx-arm64", "linux-64"]
 
@@ -109,6 +110,19 @@ trip-planner = { path = ".", editable = true }
 
 # NOTE: Core dependencies (needed for running the program) go here.
 [tool.pixi.dependencies]
+nodejs = "24.*"
+
+[tool.pixi.tasks]
+install-web = "npm ci"
+dev = "npm run dev"
+format-web = "npm run format"
+lint-web = "npm run lint"
+typecheck = "npm run typecheck"
+test-python = "pytest"
+test-web = "npm run test:web"
+test-e2e = "npm run test:e2e"
+build = "npm run build"
+deploy-preview = "vercel --no-wait"
 
 # NOTE: Testing dependencies (not needed for running program) go here.
 [tool.pixi.feature.tests.dependencies]
