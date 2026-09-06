@@ -39,7 +39,9 @@ function actionRequest(
   });
 }
 
-async function setup(overrides: { actionKey?: string; trip?: any } = {}) {
+async function setup(
+  overrides: { actionKey?: string; actionTripToken?: string; trip?: any } = {},
+) {
   const repository = createMemoryTripRepository();
   const trip = overrides.trip ?? makeTripV2();
   await repository.create(tripKeyForToken(SHARE_TOKEN), {
@@ -50,6 +52,7 @@ async function setup(overrides: { actionKey?: string; trip?: any } = {}) {
     repository,
     rateLimiter: createMemoryRateLimiter(),
     actionKey: overrides.actionKey ?? ACTION_KEY,
+    actionTripToken: overrides.actionTripToken ?? SHARE_TOKEN,
     clock: () => NOW,
   });
   return { handlers, repository, trip };
@@ -64,7 +67,7 @@ beforeEach(() => vi.restoreAllMocks());
 // @spec ACT-API-001, ACT-API-002, ACT-API-003, ACT-API-004, ACT-API-005
 // @spec SEC-API-005
 describe("Action authentication and trip context", () => {
-  it("requires the Action key before inspecting the trip credential", async () => {
+  it("requires the Action key before accessing trip storage", async () => {
     const { handlers, repository } = await setup();
     const read = vi.spyOn(repository, "get");
 
@@ -77,21 +80,17 @@ describe("Action authentication and trip context", () => {
     expect(read).not.toHaveBeenCalled();
   });
 
-  it("requires a valid trip token only in the approved header", async () => {
-    const { handlers, repository } = await setup();
-    const read = vi.spyOn(repository, "get");
-    const missing = await handlers.getTripContext(
-      actionRequest("GET", `/api/actions/trip?token=${SHARE_TOKEN}`, {
-        tripToken: null,
+  it("always uses the server-bound trip and ignores request token inputs", async () => {
+    const { handlers, trip } = await setup();
+    const response = await handlers.getTripContext(
+      actionRequest("GET", `/api/actions/trip?token=${"B".repeat(22)}`, {
+        tripToken: "C".repeat(22),
       }),
     );
-    expect(missing.status).toBe(401);
-    expect(read).not.toHaveBeenCalled();
+    const body = await response.json();
 
-    const unknown = await handlers.getTripContext(
-      actionRequest("GET", "/api/actions/trip", { tripToken: "B".repeat(22) }),
-    );
-    expect(unknown.status).toBe(404);
+    expect(response.status).toBe(200);
+    expect(body.data.title).toBe(trip.title);
   });
 
   it("returns concise current context for both valid credentials", async () => {
@@ -331,13 +330,22 @@ it("shares idempotent and versioned mutation behavior with the browser API", asy
   expect(conflict.status).toBe(409);
 });
 
-// @spec SEC-DATA-006, OPS-PROC-005
-it("fails closed when the configured Action key is absent or too short", () => {
+// @spec ACT-API-003, SEC-DATA-006, OPS-PROC-005
+it("fails closed when either configured Action credential is invalid", () => {
   expect(() =>
     createActionHandlers({
       repository: createMemoryTripRepository(),
       rateLimiter: createMemoryRateLimiter(),
       actionKey: "short",
+      actionTripToken: SHARE_TOKEN,
     }),
   ).toThrow(/action key/i);
+  expect(() =>
+    createActionHandlers({
+      repository: createMemoryTripRepository(),
+      rateLimiter: createMemoryRateLimiter(),
+      actionKey: ACTION_KEY,
+      actionTripToken: "invalid",
+    }),
+  ).toThrow(/trip token/i);
 });
