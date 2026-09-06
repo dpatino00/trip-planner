@@ -1,7 +1,4 @@
-import {
-  actionConfigError,
-  getActionHandlers,
-} from "@/lib/actions/runtime";
+import { actionConfigError, getActionHandlers } from "@/lib/actions/runtime";
 
 export const runtime = "nodejs";
 export async function POST(
@@ -9,10 +6,7 @@ export async function POST(
   context: { params: Promise<{ proposalId: string }> },
 ) {
   try {
-    return getActionHandlers().applyPlanProposal(
-      request,
-      await context.params,
-    );
+    return getActionHandlers().applyPlanProposal(request, await context.params);
   } catch {
     return actionConfigError();
   }
