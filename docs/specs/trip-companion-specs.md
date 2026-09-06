@@ -1,13 +1,14 @@
 # Conversational Trip Companion Specifications
 
 **Related LLD**: [Conversational Trip Companion — Low-Level Design](../llds/trip-companion.md)
-**Last updated**: 2026-09-02
+**Last updated**: 2026-09-06
 
 Feature prefixes used in this file:
 
 - `PLC`: destination-neutral saved places and external links
 - `TRIP`: shared-trip lifecycle and persistence
 - `ACT`: Custom GPT Action contracts and behavior
+- `CHAT`: embedded Ask data, API, backend, and interface behavior
 - `OPT`: itinerary optimization proposals
 - `COND`: live and forecast condition data
 - `REC`: recommendation scoring and location assistance
@@ -92,16 +93,16 @@ active gap introduced or changed by the approved conversational design.
 
 ## Custom GPT Actions
 
-- [ ] **ACT-DATA-001**: The checked-in Custom GPT Action schema shall describe only the approved Action API operations and their accepted fields.
+- [ ] **ACT-DATA-001**: The checked-in Custom GPT Action schema shall describe only the approved Action API operations and their accepted fields using directly declared path parameters and plain top-level object request bodies that the Custom GPT Action importer can discover without dynamic header parameters, parameter references, or composed request bodies.
 - [ ] **ACT-DATA-002**: Each Custom GPT Action operation shall have a unique stable operation identifier.
 - [ ] **ACT-DATA-003**: Each Custom GPT Action operation shall have an explicit description of its purpose.
-- [ ] **ACT-DATA-004**: The checked-in Custom GPT instructions shall tell the GPT to request a private trip link when the conversation contains no trip token.
-- [ ] **ACT-DATA-005**: The checked-in Custom GPT instructions shall tell the GPT never to repeat a trip token in its response.
+- [ ] **ACT-DATA-004**: The checked-in Custom GPT instructions shall tell the GPT that its Action API is already bound to one trip and shall not request a private trip link.
+- [ ] **ACT-DATA-005**: The checked-in Custom GPT Action schema and instructions shall exclude the private trip token from model-visible arguments and configuration text.
 - [ ] **ACT-DATA-006**: The checked-in Custom GPT instructions shall tell the GPT to retrieve current trip context before its first mutation.
 - [ ] **ACT-DATA-007**: The `applyPlanProposal` Action description shall permit invocation only after the user explicitly accepts the identified proposal.
-- [ ] **ACT-API-001**: When an Action request contains a valid Action API key and valid trip token in their approved headers, the Action API shall authenticate the request for that trip.
-- [ ] **ACT-API-002**: If an Action request has a missing or invalid Action API key, then the Action API shall return status 401 before inspecting the trip token.
-- [ ] **ACT-API-003**: If an Action request has a missing or malformed trip token, then the Action API shall return status 401 without accessing trip storage.
+- [ ] **ACT-API-001**: When an Action request contains a valid bearer Action API key and production has a valid server-configured Action trip token, the Action API shall authenticate the request for only that configured trip.
+- [ ] **ACT-API-002**: If an Action request has a missing or invalid Action API key, then the Action API shall return status 401 without accessing trip storage.
+- [ ] **ACT-API-003**: If the server-configured Action trip token is missing or malformed, then the Action API shall fail closed without accessing trip storage or exposing configuration values.
 - [ ] **ACT-API-004**: If a valid Action request identifies no unexpired trip, then the Action API shall return status 404 without revealing a storage identifier.
 - [ ] **ACT-API-005**: When `getTripContext` authenticates successfully, the Action API shall return concise trip metadata, destination, preferences, places, itinerary, latest pending proposal, and current version.
 - [ ] **ACT-API-006**: When `setTripDestination` receives valid destination data for the current version, the Action API shall persist that destination and return the updated destination.
@@ -119,6 +120,40 @@ active gap introduced or changed by the approved conversational design.
 - [ ] **ACT-BE-001**: When an Action mutation succeeds, the system shall run the same schema validation, idempotency, concurrency, and persistence behavior used by browser mutations.
 - [ ] **ACT-BE-002**: If an Action mutation targets a stale trip version, then the system shall return status 409 with the current version and without guessing how to reapply the conversational request.
 - [ ] **ACT-BE-003**: When a valid Action place-add, place-update, destination-update, or preference-update mutation succeeds, the system shall recalculate the pending plan proposal before returning.
+
+## Embedded Ask Data and API
+
+- [x] **CHAT-DATA-001**: Each embedded Ask place suggestion shall contain the required name, summary, nullable locality, unique valid interests, no more than ten normalized tags, profile, unique valid dayparts, nullable duration, nullable cost, nullable reservation recommendation, and nullable HTTPS source URL fields.
+- [x] **CHAT-DATA-002**: The embedded Ask response shall contain a message of no more than 2,000 characters and no more than three valid place suggestions.
+- [x] **CHAT-DATA-003**: The embedded Ask model context shall include bounded authoritative trip details while excluding share tokens, storage identifiers, expiry metadata, and unnecessary timestamps.
+- [x] **CHAT-DATA-004**: The embedded Ask browser shall retain no more than twelve versioned text messages in session storage under a SHA-256-derived trip key that excludes the raw token.
+- [x] **CHAT-API-001**: When the embedded Ask API receives a valid bearer token, a 1–2,000 character message, and no more than eight bounded history messages, the system shall load the authoritative trip and return a no-store validated Ask response.
+- [x] **CHAT-API-002**: If the embedded Ask API receives missing or malformed bearer authentication, then the system shall return status 401 before reading trip storage.
+- [x] **CHAT-API-003**: If the embedded Ask API receives an unknown or expired trip token, then the system shall return status 404.
+- [x] **CHAT-API-004**: If an embedded Ask request exceeds 16 KiB or violates message, history-count, per-item, combined-history, or unknown-field constraints, then the system shall return status 413 or 400 without calling the model.
+- [x] **CHAT-API-005**: If embedded Ask content contains the exact authenticated trip token, then the system shall return status 400 without calling the model.
+- [x] **CHAT-API-006**: If one hashed trip/address pair makes more than ten embedded Ask requests in ten minutes, then the system shall return status 429 for subsequent requests in that window.
+- [x] **CHAT-API-007**: If one hashed trip makes more than one hundred embedded Ask requests in one UTC day, then the system shall return status 429 for subsequent requests that day.
+- [x] **CHAT-API-008**: If embedded Ask storage or model service is unavailable or required model configuration is absent, then the system shall return status 503 without exposing configuration values.
+- [x] **CHAT-API-009**: If the embedded Ask model exceeds twenty seconds, then the system shall return status 504.
+- [x] **CHAT-API-010**: If the embedded Ask model refuses, returns incomplete output, or returns output that fails the strict response schema, then the system shall return status 502 without returning partial model output.
+- [x] **CHAT-BE-001**: When generating an embedded Ask response, the system shall configure no model tools or web access, disable provider storage, and cap model output at 1,600 tokens.
+- [x] **CHAT-BE-002**: When embedded Ask handles a request, the system shall perform no trip repository create, update, or delete operation.
+- [x] **CHAT-BE-003**: When embedded Ask receives an itinerary-planning question, the system shall return narrative guidance for the existing Plan proposal workflow without creating a plan proposal.
+- [x] **CHAT-BE-004**: When a valid embedded Ask suggestion is explicitly confirmed, the system shall normalize it through the shared place factory, set `origin` to `chatgpt`, and add it to saved places without adding an itinerary item.
+- [x] **CHAT-BE-005**: When an embedded Ask suggestion matches a saved place by normalized name and locality, the system shall return the authoritative trip without adding another place or itinerary item.
+- [x] **CHAT-BE-006**: If the first confirmed-suggestion mutation conflicts, then the browser shall retry once against the returned authoritative trip with the same mutation identifier.
+- [x] **CHAT-BE-007**: If the confirmed-suggestion mutation conflicts twice, then the browser shall retain the suggestion for another explicit retry.
+- [x] **CHAT-BE-008**: When embedded Ask completes a model request, the system shall log only request metadata, hashed trip identity, duration, status, configured model, and returned token usage.
+
+## Embedded Ask Interface
+
+- [x] **CHAT-UI-001**: The trip workspace shall provide Ask as the fourth mobile-bottom and wide-screen-side navigation destination.
+- [x] **CHAT-UI-002**: When a traveler submits Ask with Enter or the send control, the interface shall append the user message, show a loading state, and render the returned assistant message and inline suggestions.
+- [x] **CHAT-UI-003**: When Shift+Enter is pressed in the Ask composer, the interface shall insert a newline without submitting.
+- [x] **CHAT-UI-004**: When a traveler dismisses an Ask suggestion, the interface shall remove only that session-local card without mutating the trip.
+- [x] **CHAT-UI-005**: When a traveler adds an Ask suggestion, the interface shall expose saved, duplicate, retryable-conflict, or error status and retain the card when retry is possible.
+- [x] **CHAT-UI-006**: While the workspace is offline, the Ask composer and suggestion-add controls shall be disabled while prior session messages remain readable.
 
 ## Optimization Proposals
 
@@ -219,8 +254,8 @@ active gap introduced or changed by the approved conversational design.
 
 ## Application Shell and Accessibility
 
-- [ ] **APP-UI-001**: The phone trip workspace shall provide persistent Today, Ideas, and Plan navigation at the bottom of the viewport.
-- [ ] **APP-UI-002**: The wide-screen trip workspace shall provide Today, Ideas, and Plan navigation in a left-side rail.
+- [x] **APP-UI-001**: The phone trip workspace shall provide persistent Today, Ideas, Plan, and Ask navigation at the bottom of the viewport.
+- [x] **APP-UI-002**: The wide-screen trip workspace shall provide Today, Ideas, Plan, and Ask navigation in a left-side rail.
 - [x] **APP-UI-003**: The trip companion shall remain usable without horizontal page scrolling at viewport widths of 375, 768, 1024, and 1440 CSS pixels.
 - [x] **APP-UI-004**: The trip companion shall provide touch targets of at least 44 by 44 CSS pixels for primary interactive controls.
 - [x] **APP-UI-005**: The trip companion shall provide visible keyboard focus, semantic labels, and WCAG AA color contrast for interactive content.
@@ -245,6 +280,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **PWA-UI-006**: When an application update is available while an edit form is dirty, the system shall defer activation until a later navigation.
 - [x] **PWA-PROC-005**: While a shared-trip workspace is visible and online, the browser shall revalidate trip data every 15 seconds and on window focus.
 - [x] **PWA-PROC-006**: While a shared-trip workspace is visible and online, the browser shall revalidate condition data every 15 minutes.
+- [x] **PWA-UI-007**: While the device is offline, the trip companion shall disable embedded Ask generation and confirmation without deleting session-local messages.
 
 ## Security and Privacy
 
@@ -255,11 +291,14 @@ active gap introduced or changed by the approved conversational design.
 - [x] **SEC-DATA-004**: The trip companion shall store only cryptographic hashes of client addresses used for rate limiting.
 - [ ] **SEC-DATA-005**: The trip companion shall not write the Action key or Action trip token to application logs, analytics, browser persistence, or service-worker caches.
 - [ ] **SEC-DATA-006**: The production trip companion shall reject a configured Action key shorter than 32 bytes.
+- [x] **SEC-DATA-007**: The trip companion shall remove the exact share token from embedded Ask content before persisting session-local messages.
+- [x] **SEC-DATA-008**: Embedded Ask telemetry shall exclude conversation content, raw client addresses, raw share tokens, model output, and server secrets.
 - [x] **SEC-API-001**: The deployed trip companion shall send a content security policy that permits browser connections only to the application origin.
 - [x] **SEC-API-002**: The deployed trip companion shall send headers that deny framing, prevent MIME sniffing, suppress referrers, and restrict unnecessary browser permissions.
 - [ ] **SEC-API-003**: Both browser mutation routes and Action mutation routes shall reject request bodies larger than 64 KiB before parsing application data.
 - [ ] **SEC-API-005**: The Action API shall accept Action and trip credentials only in their approved request headers.
 - [ ] **SEC-API-006**: The trip companion shall not fetch a GPT-supplied place source URL from the server.
+- [x] **SEC-API-007**: The embedded Ask model integration shall configure no tools, web access, or arbitrary outbound URL fetching.
 - [x] **SEC-UI-001**: The trip companion shall include no analytics or third-party browser scripts in the initial release.
 
 ## Repository Workflow and Deployment
@@ -272,4 +311,5 @@ active gap introduced or changed by the approved conversational design.
 - [x] **OPS-PROC-006**: When the preview-deployment task is run, the system shall create a Vercel preview rather than a production deployment.
 - [x] **OPS-PROC-007**: The repository workflow shall require explicit approval before initiating a production deployment.
 - [x] **OPS-PROC-008**: Before a preview is accepted, the repository workflow shall require successful formatting, linting, type checking, unit tests, integration tests, browser tests, accessibility checks, and a production build.
-- [ ] **OPS-PROC-009**: The initial Custom GPT Action release shall operate without an OpenAI API key or OpenAI SDK in the application.
+- [x] **OPS-PROC-009**: If `OPENAI_API_KEY` or `OPENAI_MODEL` is absent, then the embedded Ask API shall fail closed while non-chat trip features remain available.
+- [x] **OPS-PROC-010**: The production application shall require shared Upstash-backed trip and rate-limit storage, while Custom GPT Action credentials shall be optional unless that secondary client is enabled.

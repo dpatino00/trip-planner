@@ -1,14 +1,18 @@
 import type {
+  TripApiMutation,
   TripDocument,
-  TripMutation,
   TripMutationRequest,
 } from "@/lib/types";
 
-type RequestResult = { status: number; trip: TripDocument };
+type RequestResult = {
+  status: number;
+  trip: TripDocument;
+  duplicate?: boolean;
+};
 interface MutationOptions {
   trip: TripDocument;
   mutationId: string;
-  mutation: TripMutation;
+  mutation: TripApiMutation;
   request: (body: TripMutationRequest) => Promise<RequestResult>;
   draft?: unknown;
 }
@@ -29,7 +33,11 @@ export async function mutateTripWithRetry({
       mutation,
     });
     if (response.status !== 409)
-      return { status: "success" as const, trip: response.trip };
+      return {
+        status: "success" as const,
+        trip: response.trip,
+        duplicate: response.duplicate ?? false,
+      };
     current = response.trip;
   }
   return { status: "conflict" as const, trip: current, draft };

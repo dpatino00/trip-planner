@@ -2,7 +2,72 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 import { makeTripV2, SHARE_TOKEN } from "../web/fixtures";
-import { mockTripApi } from "./mock-api";
+import { createMockTripBackend, mockTripApi } from "./mock-api";
+
+// @spec CHAT-UI-001
+test("provides Ask as the fourth trip navigation destination", async ({
+  page,
+}) => {
+  await mockTripApi(page);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  const navigation = page.getByRole("navigation", { name: "Trip" });
+  await expect(navigation.getByRole("link")).toHaveCount(4);
+  await expect(navigation.getByRole("link", { name: "Ask" })).toBeVisible();
+});
+
+// @spec CHAT-UI-002, CHAT-UI-004, CHAT-UI-005, CHAT-BE-004, CHAT-BE-005
+test("adds a reviewed Ask suggestion to Ideas for collaborators without scheduling it", async ({
+  page,
+  browser,
+}) => {
+  const backend = createMockTripBackend();
+  await mockTripApi(page, backend);
+  const collaboratorContext = await browser.newContext();
+  const collaborator = await collaboratorContext.newPage();
+  await mockTripApi(collaborator, backend);
+  try {
+    await page.goto(`/trip#${SHARE_TOKEN}`);
+    await page.getByRole("link", { name: "Ideas" }).click();
+    await expect(
+      page.getByRole("article", { name: "La Jolla Cove" }),
+    ).toHaveCount(0);
+
+    await collaborator.goto(`/trip#${SHARE_TOKEN}`);
+    await collaborator.getByRole("link", { name: "Ideas" }).click();
+    await expect(
+      collaborator.getByRole("article", { name: "La Jolla Cove" }),
+    ).toHaveCount(0);
+
+    await page.getByRole("link", { name: "Ask" }).click();
+    await page
+      .getByLabel("Ask about this trip")
+      .fill("A relaxed coastal morning?");
+    await page.getByRole("button", { name: "Send" }).click();
+    const suggestion = page.getByRole("article", { name: "La Jolla Cove" });
+    await expect(suggestion).toBeVisible();
+    await suggestion
+      .getByRole("button", { name: "Add La Jolla Cove to trip" })
+      .click();
+    await expect(suggestion.getByText("Saved to Ideas")).toBeVisible();
+
+    await page.getByRole("link", { name: "Ideas" }).click();
+    await expect(
+      page.getByRole("article", { name: "La Jolla Cove" }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Plan" }).click();
+    await expect(
+      page.getByTestId("itinerary-item").filter({ hasText: "La Jolla Cove" }),
+    ).toHaveCount(0);
+
+    await collaborator.reload();
+    await collaborator.getByRole("link", { name: "Ideas" }).click();
+    await expect(
+      collaborator.getByRole("article", { name: "La Jolla Cove" }),
+    ).toBeVisible();
+  } finally {
+    await collaboratorContext.close();
+  }
+});
 
 // @spec TRIP-UI-001, TRIP-UI-002, TRIP-UI-003
 test("creates a trip after explaining the private link model", async ({

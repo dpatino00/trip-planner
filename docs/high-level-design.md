@@ -1,7 +1,7 @@
 # Conversational Trip Companion — High-Level Design
 
 **Created**: 2026-09-01
-**Last updated**: 2026-09-02
+**Last updated**: 2026-09-06
 
 ## Problem Statement
 
@@ -12,20 +12,22 @@ trip schedule, current local conditions, and saved decisions into one focused
 experience. Maintaining that plan through forms also becomes tedious as ideas
 emerge naturally in conversation.
 
-The Trip Companion will be a mobile-first shared trip website with a
-conversational control surface. Travelers can tell a private Custom GPT what they
-want to add or change; the GPT will translate that intent into structured API
-mutations, and the website will remain the visual source of truth. The companion
-will support custom destinations and places without depending on destination-
-specific catalogs or per-place imagery.
+The Trip Companion will be a mobile-first shared trip website with an embedded
+Ask experience. Travelers can ask for contextual advice and receive reviewable
+place suggestions without leaving the trip. Only an explicit Add to trip action
+mutates the shared plan, which remains the visual and durable source of truth. A
+private Custom GPT may continue to use authenticated Actions as an optional
+secondary client.
 
 ## Goals
 
 - Make a useful recommendation available within seconds of opening the app.
 - Support arbitrary trip destinations and traveler-supplied places rather than a
   San Diego-only catalog.
-- Let a private Custom GPT read and update a trip through authenticated GPT
-  Actions defined by an OpenAPI schema.
+- Let travelers ask an embedded AI for trip-aware narrative advice and
+  reviewable place suggestions.
+- Require explicit confirmation before an AI suggestion changes shared state.
+- Preserve authenticated Custom GPT Actions as an optional secondary client.
 - Turn conversational requests into structured place ideas, preferences,
   constraints, and itinerary proposals without requiring repeated form entry.
 - Recompute deterministic trip suggestions after relevant mutations using
@@ -38,15 +40,16 @@ specific catalogs or per-place imagery.
 - Remain useful with weak connectivity by preserving the app shell, saved places, and
   last successfully loaded trip data and conditions.
 - Deliver a polished, accessible, installable experience optimized for phones.
-- Keep operating cost at zero for expected personal-trip usage by using free
-  service tiers and key-free condition data.
+- Bound AI operating cost with per-trip request allowances, compact context, and
+  capped model output while retaining free-tier storage and condition data.
 - Preserve the repository's Pixi workflow while using Vercel's supported native
   build path for the deployed web application.
 
 ## Non-Goals
 
-- Embedding a second chat interface or OpenAI model inside the website in the
-  first conversational release.
+- Persisting chat history as shared trip data or across browser sessions.
+- Allowing the embedded model to call tools, browse the web, or directly mutate
+  a trip.
 - Allowing the GPT to edit application code, deploy the website, make bookings,
   purchase anything, or delete a trip.
 - Letting automated optimization silently overwrite confirmed itinerary choices.
@@ -82,7 +85,7 @@ prevent the place from being saved.
 ```text
 ┌──────────────────────┐       ┌──────────────────────────────┐
 │ Private Custom GPT   │       │ Next.js progressive web app │
-│ conversation         │       │ Today · Ideas · Plan        │
+│ optional Actions     │       │ Today · Ideas · Plan · Ask  │
 └──────────┬───────────┘       └──────────────┬───────────────┘
            │ GPT Action HTTPS                 │ same-origin HTTPS
            │ OpenAPI + action API key         │
@@ -90,7 +93,7 @@ prevent the place from being saved.
                               ▼
                  ┌──────────────────────────────┐
                  │ Next.js route handlers       │
-                 │ Action API · Trip API        │
+                 │ Action · Trip · Chat APIs    │
                  │ validation · optimizer       │
                  │ conditions adapter           │
                  └──────────────┬───────────────┘
@@ -100,22 +103,25 @@ prevent the place from being saved.
     ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
     │ Upstash Redis    │  │ Open-Meteo APIs  │  │ External place   │
     │ shared trip JSON │  │ weather · air ·  │  │ and Maps links   │
-    │ + proposals      │  │ marine           │  │                  │
+    │ + proposals      │  │ marine           │  │ OpenAI Responses │
     └──────────────────┘  └──────────────────┘  └──────────────────┘
 
 Deployment: Pixi task → Vercel CLI → Vercel preview/production
 ```
 
 The Next.js App Router application will serve the interface, destination-neutral
-place data, same-origin trip endpoints, and a small public Action API. The Custom
-GPT will use the Action API to read trip context and submit structured additions
-or changes. The website and GPT will use the same trip service and persisted trip
-document so neither becomes a second source of truth.
+place data, same-origin trip and chat endpoints, and a small public Action API.
+The chat endpoint authenticates the share token, loads an authoritative compact
+trip context, and asks the OpenAI Responses API for narrative advice and up to
+three structured place suggestions. It has no mutation tools. The browser sends
+an explicit, versioned trip mutation only after a traveler chooses Add to trip.
 
 The Action API will require a dedicated, revocable integration key configured as
 the Custom GPT Action's API-key credential. This key is distinct from an OpenAI
-API key and from the browser's private trip link. The initial integration is for
-a private, owner-operated GPT; per-user OAuth and publishing the GPT are deferred.
+API key and from the browser's private trip link. The initial private,
+owner-operated GPT is bound to one trip by a server-only trip token so the model
+never receives the browser credential; per-user OAuth, multi-trip GPTs, and
+publishing the GPT are deferred.
 Action operations will be narrow and will not expose trip deletion.
 
 After a relevant mutation, the server will validate and deduplicate the input,
@@ -148,7 +154,9 @@ live, stale, and unavailable data.
 | --- | --- | --- |
 | Make the website the trip source of truth and ChatGPT a client | The plan stays durable, inspectable, and usable even when ChatGPT is closed; conversation becomes a convenient control surface instead of a second datastore. | Storing the plan only in GPT conversation history, letting GPT edit website files. |
 | Support custom places from conversation | Travelers can plan any destination without waiting for a hardcoded catalog. Structured fields keep GPT output testable. | One destination-specific catalog, a mandatory paid place-search API. |
-| Use GPT Actions rather than an embedded site chat | OpenAI documents Actions as the bridge from natural language to authenticated REST API calls, and the existing website does not need an OpenAI model call for the first release. | Embedding an OpenAI-powered chat UI, manual copy and paste. |
+| Make embedded Ask the primary conversational surface | Travelers retain trip context and review suggestions in one mobile flow; the model remains a read-only authenticated client until explicit confirmation. | Custom GPT Actions only, manual copy and paste. |
+| Keep chat session-local | Conversation content is not shared trip state and is limited to the current browser tab, reducing storage and privacy risk. | Server-side conversation history, durable browser history. |
+| Use strict Structured Outputs for suggestions | A validated transport shape prevents malformed model data from reaching mutation code, while narrative plan advice avoids a competing proposal schema. | Free-form extraction, model-created plan proposals. |
 | Use a dedicated Action API key for the private MVP | It is the smallest supported authentication model for an owner-operated GPT and remains separate from OpenAI and trip-sharing credentials. | No Action authentication, OAuth in the first release. |
 | Keep optimization deterministic and proposal-based | Results remain explainable and testable; confirmed plans are not silently rearranged. | An autonomous AI worker that directly rewrites the itinerary. |
 | Use Next.js, React, and TypeScript on Vercel | This provides a strong mobile UI foundation, integrated server endpoints, PWA support, and a first-class Vercel deployment path. | FastAPI with templates, separate React and Python applications. |
@@ -174,6 +182,13 @@ live, stale, and unavailable data.
 - The Action key will be stored only in server environment configuration and the
   Custom GPT Action authentication settings, never in browser code or a shared
   trip URL.
+- The one-trip GPT's trip token will be stored only in server environment
+  configuration and will not appear in GPT instructions or Action arguments.
+- The OpenAI key and model name are server-only. Chat requests and responses,
+  raw client addresses, and raw share tokens are never logged.
+- Chat context excludes credentials, storage keys, expiry metadata, and
+  unnecessary timestamps. Submitted content containing the exact trip token is
+  rejected.
 - GPT-supplied URLs and coordinates will be treated as untrusted inputs. The
   server will validate structure and the interface will label source links rather
   than presenting them as independently verified facts.
@@ -191,9 +206,12 @@ Vercel builds.
 
 Vercel will host the Next.js application and route handlers. Upstash will be
 provisioned through the Vercel Marketplace on its free tier, with credentials
-injected as server-only environment variables. The initial release will be
-validated as a Vercel preview. A production deployment and automatic Git-based
-deployments will be enabled only after preview approval.
+injected as server-only environment variables. Production also requires an
+OpenAI API key and configured model. Chat is limited to ten requests per hashed
+trip/address pair per ten minutes and one hundred per hashed trip per UTC day.
+The initial release will be validated as a Vercel preview. A production
+deployment and automatic Git-based deployments will be enabled only after
+preview approval.
 
 ## Open Questions
 
@@ -205,3 +223,5 @@ validation rules without expanding this scope.
 
 - [OpenAI GPT Actions overview](https://developers.openai.com/api/docs/actions/introduction)
 - [OpenAI GPT Action authentication](https://developers.openai.com/api/docs/actions/authentication)
+- [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+- [OpenAI Responses API](https://developers.openai.com/api/reference/cli/resources/responses/methods/create)

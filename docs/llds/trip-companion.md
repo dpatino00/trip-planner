@@ -1,16 +1,16 @@
 # Conversational Trip Companion — Low-Level Design
 
 **Created**: 2026-09-01
-**Last updated**: 2026-09-02
+**Last updated**: 2026-09-06
 **Related HLD**: [Conversational Trip Companion — High-Level Design](../high-level-design.md)
 
 ## Context and Design Philosophy
 
 The trip companion is a destination-neutral shared plan. The website owns the
-durable trip state and visual experience. A private Custom GPT is an additional
-client that translates conversation into authenticated, structured mutations.
-It does not store the canonical plan, edit application code, or run a separate
-autonomous workflow.
+durable trip state and visual experience. Embedded Ask is an authenticated,
+read-only AI client that returns narrative advice and reviewable place
+suggestions. Only a separate explicit browser mutation can add a suggestion. A
+private Custom GPT remains an optional additional client for structured Actions.
 
 The implementation follows these principles:
 
@@ -39,16 +39,17 @@ and offline status.
 ```text
 Custom GPT
 └── OpenAPI Action client
-    ├── static Action API key in Authorization header
-    └── current trip token in X-Trip-Token header
+    └── static Action API key in Authorization header
 
 Next.js application
 ├── landing and trip creation
 ├── /trip workspace
 │   ├── Today
 │   ├── Ideas
-│   └── Plan
+│   ├── Plan
+│   └── Ask (session-local conversation)
 ├── /api/trip browser route
+├── /api/trip/chat embedded AI route
 ├── /api/actions/trip Action routes
 └── /api/conditions destination-neutral condition route
 
@@ -345,31 +346,84 @@ interface ApiError {
 Browser mutations include place add/update, preference changes, favorite changes,
 itinerary changes, and proposal application or dismissal. They retain the
 existing `{ baseVersion, mutationId, mutation }` envelope and atomic version
-checks.
+checks. The transport-only `add-suggested-place` mutation carries a validated
+`SuggestedPlace`; the server normalizes it into the existing internal
+`add-place` mutation. A normalized name/locality duplicate is a successful no-op.
+
+## Embedded Ask Contract
+
+`POST /api/trip/chat` authenticates `Authorization: Bearer <trip-token>` and
+accepts a trimmed 1–2,000 character `message` plus at most eight prior user or
+assistant text messages. Each history item is 1–2,000 characters and combined
+history is capped at 8,000 characters. Bodies above 16 KiB are rejected.
+
+The client never submits a trip document. After authentication, the route loads
+the authoritative trip and constructs a compact context containing title,
+destination, dates, preferences, capped saved-place summaries, itinerary items,
+and a pending-proposal summary. Tokens, internal keys, expiry metadata, and
+unnecessary timestamps are excluded, and serialized context is capped.
+
+```ts
+interface SuggestedPlace {
+  name: string;
+  summary: string;
+  locality: string | null;
+  interests: Interest[];
+  tags: string[];
+  profile: "indoor" | "outdoor" | "coastal" | "mixed";
+  preferredDayparts: Daypart[];
+  durationMinutes: number | null;
+  costLevel: 0 | 1 | 2 | 3 | null;
+  reservationRecommended: boolean | null;
+  sourceUrl: string | null;
+}
+
+interface TripChatResponse {
+  message: string;
+  suggestions: SuggestedPlace[];
+}
+```
+
+All strict Structured Output properties are required; nullable properties
+represent optional concepts. The response message is at most 2,000 characters
+and suggestions are capped at three. `sourceUrl` is null unless the same URL was
+already present in authoritative trip or user context and is always labeled
+unverified.
+
+The injected `TripChatModel` production adapter uses the OpenAI Node SDK,
+`responses.parse()` with `zodTextFormat`, `store: false`, the configured
+`OPENAI_MODEL`, a 1,600-token output cap, and a 20-second timeout. It configures
+no tools, browsing, or arbitrary HTTP. Invalid, incomplete, or refused model
+output returns `502`; timeout returns `504`; missing server configuration or an
+unavailable model/storage service returns `503`.
+
+Chat is limited to ten requests per hashed trip/address pair per ten minutes and
+one hundred requests per hashed trip per UTC day. The daily allowance is the MVP
+budget control; a weighted token ledger is deferred. Successful and error
+responses are `no-store`.
 
 ## Custom GPT Action Contracts
 
 Official OpenAI documentation requires a GPT Action to describe its API through
-an OpenAPI schema and supports API key or OAuth authentication. The initial
-private integration uses API key authentication and does not call the OpenAI API
-from the application.
+an OpenAPI schema and supports API key or OAuth authentication. This optional
+private integration continues to use API key authentication independently of
+the embedded OpenAI API integration.
 
 Every Action request requires:
 
 ```http
 Authorization: Bearer <TRIP_GPT_ACTION_KEY>
-X-Trip-Token: <token extracted from the user's private trip link fragment>
 ```
 
-The Action key proves the caller is the configured integration. The trip token
-selects and authorizes one trip. Neither credential is accepted in a path, query
-string, or JSON body. The GPT instructions tell it never to repeat the token in a
-response and to request the private trip link when the current conversation does
-not contain one.
+The Action key proves the caller is the configured integration. The server reads
+`TRIP_GPT_TRIP_TOKEN` from its environment to select and authorize the one trip
+bound to this private GPT. The trip token is not accepted from the GPT in a path,
+query string, header, JSON body, or instructions; it is never returned and is
+excluded from logs and caches.
 
 | `operationId`        | Method and endpoint                                   | Input                                                                                              | Success behavior                                                                                               |
 | -------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `getTripContext`     | `GET /api/actions/trip`                               | Required authentication headers                                                                    | Returns concise trip metadata, preferences, places, itinerary, latest pending proposal, and version            |
+| `getTripContext`     | `GET /api/actions/trip`                               | No operation arguments                                                                              | Returns concise trip metadata, preferences, places, itinerary, latest pending proposal, and version            |
 | `setTripDestination` | `POST /api/actions/trip/destination`                  | Version, mutation ID, destination name, and optional locality, country, coordinates, and time zone | Updates the destination context, refreshes applicable conditions on the next read, and returns the destination |
 | `addPlace`           | `POST /api/actions/trip/places`                       | Version, mutation ID, required name, optional structured place fields                              | Adds one place idempotently, runs optimization, and returns the place plus latest proposal                     |
 | `updatePlace`        | `PATCH /api/actions/trip/places/{placeId}`            | Version, mutation ID, allowlisted place changes                                                    | Updates one existing place, runs optimization, and returns the place plus latest proposal                      |
@@ -398,6 +452,12 @@ because ChatGPT uses them to decide which Action to call and how to populate its
 parameters. The `applyPlanProposal` description states that it may be called only
 after the user explicitly accepts the identified proposal.
 
+The checked-in schema uses directly declared path parameters and plain top-level
+object request bodies. It does not rely on dynamic header parameters, reusable
+parameter `$ref` entries, or `allOf` composition because the Custom GPT Action
+importer must be able to discover every operation and input without
+general-purpose OpenAPI reference resolution. The schema contains no trip token.
+
 ## Storage, Concurrency, and Rate Limits
 
 Trip keys remain `trip:v1:<sha256(trip-token)>`; changing the document schema does
@@ -417,7 +477,9 @@ Browser and Action mutations share this sequence:
    and preserve absolute expiry atomically.
 7. Return `409` with current version information if another writer won.
 
-The browser may retry one conflict after rebasing its semantic mutation. The GPT
+The browser retries a confirmed suggestion once after rebasing its semantic
+mutation against the authoritative trip returned by a conflict, preserving the
+same mutation ID. A second conflict preserves the suggestion card for retry. The GPT
 must call `getTripContext` and repeat its requested mutation with a new mutation
 ID after a conflict; the server never guesses at conversational intent.
 
@@ -426,15 +488,25 @@ mutations to 30 per hashed Action-key/trip-token pair per minute. Rate-limit key
 expire with their windows. The application never stores raw client IPs or raw
 credentials in rate-limit keys.
 
+### Ask about a trip
+
+The Ask tab keeps a versioned maximum of twelve messages in `sessionStorage`
+under a SHA-256-derived trip key and sends only the most recent eight text
+messages. The exact trip token is removed before persistence and is rejected if
+submitted to the server. Dismissing a suggestion is session-local and performs
+no mutation. Adding a suggestion uses conflict reconciliation, updates SWR and
+the IndexedDB snapshot, and adds only to Ideas—not the itinerary. Planning
+questions receive narrative guidance that points travelers to the existing Plan
+proposal workflow; embedded Ask never creates a `PlanProposal`.
+
 ## Primary Behaviors
 
 ### Connect a conversation to a trip
 
-The website exposes a “Copy link for ChatGPT” control that copies the existing
-private trip link and explains that anyone with that link can edit the trip. The
-user pastes it into their private GPT conversation. The GPT extracts the fragment
-for the `X-Trip-Token` header and calls `getTripContext` before the first mutation.
-No separate account connection is introduced.
+The deployment owner binds the private GPT to one trip by storing that trip's
+token as `TRIP_GPT_TRIP_TOKEN`. The GPT calls `getTripContext` before the first
+mutation and never asks the user for a private trip link. No separate account
+connection is introduced.
 
 ### Add or update a place from conversation
 
@@ -489,7 +561,12 @@ status or personal safety.
 ## User Interface Design
 
 The visual system remains warm, playful, accessible, and mobile-first. The
-primary navigation uses **Today**, **Ideas**, and **Plan**.
+primary navigation uses **Today**, **Ideas**, **Plan**, and **Ask**.
+
+Ask owns its composer, loading, error, messages, and inline suggestion cards.
+Enter submits, Shift+Enter inserts a newline, and generation/add controls are
+disabled offline. Suggestion cards provide explicit **Add to trip** and
+session-local **Dismiss** controls and expose saved, duplicate, or retry states.
 
 Place cards are content-first rather than photo-first. Each card shows:
 
@@ -520,16 +597,25 @@ service-worker Cache API.
 The client stores only validated trip snapshots in IndexedDB under a hashed-token
 key. Offline mode can inspect saved places, source labels, itinerary items, and
 the last condition snapshot. External links are labeled as requiring connectivity;
-writes are not queued.
+writes and chat generation are not queued. Session-local chat remains readable.
 
 ## Security and Privacy
 
 - `TRIP_GPT_ACTION_KEY` is a server-only random secret of at least 32 bytes. The
   same value is entered in the Custom GPT Action authentication settings.
+- `TRIP_GPT_TRIP_TOKEN` is the server-only token for the single trip bound to the
+  private GPT. It is never entered in the GPT editor.
 - Action-key and trip-token comparisons use constant-time comparison after basic
   format validation. Missing or malformed credentials fail before storage reads.
 - Neither secret appears in paths, queries, response bodies, app logs, analytics,
   browser persistence, or service-worker cache keys.
+- `OPENAI_API_KEY` and `OPENAI_MODEL` are server-only. Model calls use no tools
+  and are not stored by the provider (`store: false`).
+- Chat logs contain only event name, request ID, configured model, hashed trip
+  identifier, duration, status, and returned token usage—never conversation
+  content, raw addresses, tokens, or secrets.
+- Chat bodies are limited to 16 KiB, reject the exact trip token in content, and
+  render all returned content as text.
 - Action and browser bodies are limited to 64 KiB and reject unknown fields.
 - GPT-supplied text renders only as text. Rich HTML is not accepted.
 - Optional source URLs are parsed, restricted to HTTPS, and opened only after a
@@ -545,8 +631,8 @@ writes are not queued.
 
 | Condition                           | Behavior                                                                              |
 | ----------------------------------- | ------------------------------------------------------------------------------------- |
-| Missing or invalid Action key       | Return `401 action-auth-invalid`; do not inspect the trip token.                      |
-| Missing or invalid trip token       | Return `401 trip-auth-invalid`; never echo the token.                                 |
+| Missing or invalid Action key       | Return `401 action-auth-invalid`; do not access trip storage.                         |
+| Missing or invalid configured token | Return `503 action-unavailable`; never expose the token or configuration value.       |
 | Unknown or expired trip             | Return `404 trip-not-found` without revealing storage identifiers.                    |
 | Missing place name                  | Return non-retryable `400 validation-failed`.                                         |
 | Invalid optional URL or coordinates | Save other valid place data and return a warning describing the discarded field.      |
@@ -559,6 +645,10 @@ writes are not queued.
 | Destination coordinates missing     | Return `200 unavailable`; keep condition-independent recommendations.                 |
 | Proposal has no useful changes      | Store no pending proposal and return an explanatory message.                          |
 | Browser offline during mutation     | Roll back optimistic state, retain the draft, and disable further writes.             |
+| Missing chat configuration          | Return retryable `503 configuration-unavailable` without configuration values.        |
+| Chat allowance exhausted            | Return retryable `429 rate-limited`.                                                   |
+| Model timeout                        | Return retryable `504 model-timeout` after 20 seconds.                                 |
+| Invalid, incomplete, or refused AI output | Return retryable `502 model-invalid-response`; do not expose partial suggestions. |
 | Legacy place cannot be migrated     | Render an unavailable placeholder; never crash or silently delete the itinerary item. |
 
 ## Performance Design
@@ -571,8 +661,9 @@ writes are not queued.
   queue, vector database, or additional datastore is introduced.
 - SWR owns live remote state and React derives filters, rankings, Maps URLs, and
   summary values without mirrored effect state.
-- No image-loading pipeline, place-search SDK, embedded map, drag-and-drop
-  framework, or OpenAI SDK is added for this release.
+- No image-loading pipeline, place-search SDK, embedded map, or drag-and-drop
+  framework is added for this release. The OpenAI SDK remains server-only and is
+  isolated from client bundles.
 
 ## Tooling, Build, and Deployment
 
@@ -583,11 +674,14 @@ Required production environment variables are:
 
 - `UPSTASH_REDIS_REST_URL`
 - `UPSTASH_REDIS_REST_TOKEN`
-- `TRIP_GPT_ACTION_KEY`
+- `TRIP_GPT_TRIP_TOKEN`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
 
-No `OPENAI_API_KEY` is required because ChatGPT calls the application's Action
-API; the application does not call an OpenAI model. No browser-exposed environment
-variable contains credentials.
+`TRIP_GPT_ACTION_KEY` and `TRIP_GPT_TRIP_TOKEN` are optional and enable the
+secondary Custom GPT Action client. Upstash remains required in production.
+
+No browser-exposed environment variable contains credentials.
 
 Preview deployment remains the acceptance environment. Production deployment is
 a separate explicit action after the conversational flow is validated with the
@@ -598,7 +692,7 @@ Custom GPT Action test interface and representative prompts.
 | Decision                                                            | Rationale                                                                                                | Alternatives                                                 |
 | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | Embed custom places in each trip document                           | A trip becomes destination-neutral and self-contained; old links can migrate deterministically.          | Global hardcoded catalog IDs, separate place database.       |
-| Use the Action key plus existing trip token                         | The integration is private without granting one credential access to every trip or introducing accounts. | Action key alone, OAuth, token in URL parameters.            |
+| Bind the private GPT to one server-configured trip token            | The model never receives the browser credential and the initial integration remains simple and private.  | Dynamic trip token arguments, OAuth, token in URLs.          |
 | Share mutation and repository code across browser and Action routes | Validation, concurrency, and persistence behavior cannot drift between clients.                          | Separate GPT datastore or bespoke write path.                |
 | Keep Action operations explicit                                     | Clear operation names and schemas help ChatGPT choose correctly and constrain mutations.                 | One generic mutation endpoint.                               |
 | Discard invalid optional enrichment with warnings                   | A bad link should not block saving the place the user requested.                                         | Reject the whole place, accept unsafe URLs.                  |
@@ -612,13 +706,14 @@ Custom GPT Action test interface and representative prompts.
 
 1. The initial Custom GPT is private and uses API-key authentication; OAuth and a
    publicly shared GPT are deferred.
-2. The private trip token is supplied in an Action header after the user shares
-   the trip link within the conversation.
+2. The private GPT is bound to one trip using the server-only
+   `TRIP_GPT_TRIP_TOKEN` environment variable.
 3. ChatGPT may supply a source URL, but the app validates it, labels it as a
    supplied source, and always offers generated Maps links.
 4. Images are optional and no longer part of the place contract.
 5. Optimization runs during relevant mutations and creates reviewable proposals;
-   it does not require an autonomous worker or an OpenAI API key.
+   it does not require an autonomous worker and remains separate from embedded
+   Ask's narrative-only planning advice.
 
 ### Deferred
 
@@ -631,3 +726,5 @@ Custom GPT Action test interface and representative prompts.
 
 - [OpenAI: Getting started with GPT Actions](https://developers.openai.com/api/docs/actions/getting-started)
 - [OpenAI: GPT Action authentication](https://developers.openai.com/api/docs/actions/authentication)
+- [OpenAI: Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+- [OpenAI: Responses API](https://developers.openai.com/api/reference/cli/resources/responses/methods/create)

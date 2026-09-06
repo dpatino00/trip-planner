@@ -1,6 +1,26 @@
 import type { Page, Route } from "@playwright/test";
 
+import type { SavedPlace } from "../../lib/types";
 import { makeConditionsV2, makeTripV2, SHARE_TOKEN } from "../web/fixtures";
+
+type MockTrip = ReturnType<typeof makeTripV2>;
+
+export interface MockTripBackend {
+  getTrip: () => MockTrip;
+  setTrip: (trip: MockTrip) => void;
+}
+
+export function createMockTripBackend(
+  initial: MockTrip = makeTripV2(),
+): MockTripBackend {
+  let trip = initial;
+  return {
+    getTrip: () => trip,
+    setTrip: (next) => {
+      trip = next;
+    },
+  };
+}
 
 function json(
   route: Route,
@@ -16,13 +36,35 @@ function json(
   });
 }
 
-export async function mockTripApi(page: Page) {
-  let trip = makeTripV2();
-
+export async function mockTripApi(
+  page: Page,
+  backend: MockTripBackend = createMockTripBackend(),
+) {
   await page.route("**/api/conditions**", (route) =>
     json(route, makeConditionsV2()),
   );
+  await page.route("**/api/trip/chat", (route) =>
+    json(route, {
+      message: "La Jolla Cove could fit a relaxed coastal morning.",
+      suggestions: [
+        {
+          name: "La Jolla Cove",
+          summary: "A compact coastal stop for views and wildlife.",
+          locality: "La Jolla",
+          interests: ["coast", "wildlife"],
+          tags: ["coast", "sea lions"],
+          profile: "coastal",
+          preferredDayparts: ["morning"],
+          durationMinutes: 90,
+          costLevel: 0,
+          reservationRecommended: false,
+          sourceUrl: null,
+        },
+      ],
+    }),
+  );
   await page.route("**/api/trip", async (route) => {
+    let trip = backend.getTrip();
     const method = route.request().method();
     if (method === "POST")
       return json(route, { token: SHARE_TOKEN, trip }, 201);
@@ -87,14 +129,37 @@ export async function mockTripApi(page: Page) {
             : proposal,
         ),
       };
+    } else if (mutation.type === "add-suggested-place") {
+      const duplicate = trip.places.some(
+        (place: SavedPlace) =>
+          place.name.trim().toLocaleLowerCase() ===
+            mutation.suggestion.name.trim().toLocaleLowerCase() &&
+          (place.locality ?? "").trim().toLocaleLowerCase() ===
+            (mutation.suggestion.locality ?? "").trim().toLocaleLowerCase(),
+      );
+      if (duplicate) return json(route, { trip, duplicate: true });
+      const timestamp = "2026-09-06T12:00:00.000Z";
+      trip = {
+        ...trip,
+        version: trip.version + 1,
+        places: [
+          ...trip.places,
+          {
+            ...mutation.suggestion,
+            id: "place-la-jolla-cove",
+            coordinates: null,
+            waterContact: false,
+            accessibility: [],
+            origin: "chatgpt",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ],
+      };
     }
+    backend.setTrip(trip);
     return json(route, { trip });
   });
 
-  return {
-    getTrip: () => trip,
-    setTrip: (next: ReturnType<typeof makeTripV2>) => {
-      trip = next;
-    },
-  };
+  return backend;
 }

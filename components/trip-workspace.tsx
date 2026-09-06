@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 
+import { TripChat } from "@/components/chat/trip-chat";
 import {
   loadTripSnapshot,
   removeTripSnapshot,
@@ -16,15 +17,18 @@ import { rankPlaces } from "@/lib/recommendations/scoring";
 import type {
   ConditionsEnvelope,
   SavedPlace,
+  SuggestedPlace,
   TripDocument,
+  TripApiMutation,
   TripMutation,
 } from "@/lib/types";
 import {
   createConditionRefreshPolicy,
   createTripRefreshPolicy,
+  mutateTripWithRetry,
 } from "@/lib/trips/client";
 
-type View = "today" | "ideas" | "plan";
+type View = "today" | "ideas" | "plan" | "ask";
 const tokenPattern = /^[A-Za-z0-9_-]{22}$/;
 const reasonLabels: Record<string, string> = {
   "preference-match": "Matches your interests",
@@ -249,7 +253,11 @@ export function TripWorkspace() {
         }
         const params = new URLSearchParams(window.location.search);
         const initialView = params.get("view");
-        if (initialView === "ideas" || initialView === "plan") {
+        if (
+          initialView === "ideas" ||
+          initialView === "plan" ||
+          initialView === "ask"
+        ) {
           setView(initialView);
         }
         setSearch(params.get("search") ?? "");
@@ -326,28 +334,28 @@ export function TripWorkspace() {
     },
     createConditionRefreshPolicy(),
   );
-  const conditionFallback = emptyConditions(
-    `${selectedDate}T${selectedTime}:00Z`,
-  );
-  const conditions: ConditionsEnvelope = conditionsState.data
-    ? {
-        ...conditionFallback,
-        ...conditionsState.data,
-        marine: conditionsState.data.marine
-          ? Object.assign(
-              {
-                status: "unavailable" as const,
-                seaSurfaceTemperatureF: null,
-                waveHeightFt: null,
-                wavePeriodSeconds: null,
-                disclaimer:
-                  "Advisory model data; not suitable for navigation.",
-              },
-              conditionsState.data.marine,
-            )
-          : null,
-      }
-    : conditionFallback;
+  const conditions = useMemo<ConditionsEnvelope>(() => {
+    const fallback = emptyConditions(`${selectedDate}T${selectedTime}:00Z`);
+    return conditionsState.data
+      ? {
+          ...fallback,
+          ...conditionsState.data,
+          marine: conditionsState.data.marine
+            ? Object.assign(
+                {
+                  status: "unavailable" as const,
+                  seaSurfaceTemperatureF: null,
+                  waveHeightFt: null,
+                  wavePeriodSeconds: null,
+                  disclaimer:
+                    "Advisory model data; not suitable for navigation.",
+                },
+                conditionsState.data.marine,
+              )
+            : null,
+        }
+      : fallback;
+  }, [conditionsState.data, selectedDate, selectedTime]);
   const isOffline =
     !online ||
     Boolean(tripState.data?.cached) ||
@@ -389,36 +397,68 @@ export function TripWorkspace() {
     history.replaceState(null, "", `?${params.toString()}#${token}`);
   }
 
-  async function commit(mutation: TripMutation) {
-    if (!trip || !token || isOffline) return;
+  async function performMutation(mutation: TripApiMutation, draft?: unknown) {
+    if (!trip || !token || isOffline) return { status: "error" as const };
     setMutationError("");
     setDirty(true);
     try {
-      const result = await fetch("/api/trip", {
-        method: "PATCH",
-        headers: {
-          authorization: `Bearer ${token}`,
-          "content-type": "application/json",
+      const outcome = await mutateTripWithRetry({
+        trip,
+        mutationId: crypto.randomUUID(),
+        mutation,
+        draft,
+        request: async (body) => {
+          const response = await fetch("/api/trip", {
+            method: "PATCH",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify(body),
+          });
+          const payload = await response.json();
+          if (!response.ok && response.status !== 409) {
+            throw new Error(payload.error?.message ?? "Change failed");
+          }
+          return {
+            status: response.status,
+            trip: payload.trip,
+            duplicate: payload.duplicate,
+          };
         },
-        body: JSON.stringify({
-          baseVersion: trip.version,
-          mutationId: crypto.randomUUID(),
-          mutation,
-        }),
       });
-      const payload = await result.json();
-      if (!result.ok)
-        throw new Error(payload.error?.message ?? "Change failed");
-      await tripState.mutate({ trip: payload.trip }, false);
-      setCachedTrip(payload.trip);
-      await saveTripSnapshot(token, payload.trip);
+      if (outcome.status === "conflict") {
+        setMutationError("Trip changed again. Review and retry your change.");
+        await tripState.mutate({ trip: outcome.trip }, false);
+        setCachedTrip(outcome.trip);
+        await saveTripSnapshot(token, outcome.trip);
+        return { status: "conflict" as const };
+      }
+      await tripState.mutate({ trip: outcome.trip }, false);
+      setCachedTrip(outcome.trip);
+      await saveTripSnapshot(token, outcome.trip);
+      return {
+        status: outcome.duplicate ? ("duplicate" as const) : ("saved" as const),
+      };
     } catch (cause) {
       setMutationError(
         cause instanceof Error ? cause.message : "Could not save that change",
       );
+      return { status: "error" as const };
     } finally {
       setDirty(false);
     }
+  }
+
+  async function commit(mutation: TripMutation) {
+    await performMutation(mutation);
+  }
+
+  function addSuggestedPlace(suggestion: SuggestedPlace) {
+    return performMutation(
+      { type: "add-suggested-place", suggestion },
+      suggestion,
+    );
   }
 
   async function shareTrip() {
@@ -526,7 +566,7 @@ export function TripWorkspace() {
           <span className="trip-nav-mark" aria-hidden="true">
             ✦
           </span>
-          {(["today", "ideas", "plan"] as View[]).map((item) => (
+          {(["today", "ideas", "plan", "ask"] as View[]).map((item) => (
             <a
               href={`?view=${item}#${token}`}
               key={item}
@@ -971,6 +1011,15 @@ export function TripWorkspace() {
               })}
             </div>
           </>
+        )}
+
+        {view === "ask" && (
+          <TripChat
+            token={token}
+            trip={trip}
+            online={!isOffline}
+            onAddSuggestion={addSuggestedPlace}
+          />
         )}
       </main>
 

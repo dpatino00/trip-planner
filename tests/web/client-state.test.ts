@@ -13,7 +13,7 @@ import {
 } from "@/lib/trips/client";
 import { makeTripV2, SHARE_TOKEN } from "./fixtures";
 
-// @spec TRIP-BE-006
+// @spec TRIP-BE-006, CHAT-BE-006
 it("reapplies a semantic mutation to the latest document after one conflict", async () => {
   const latest = makeTripV2({ version: 2, title: "Changed elsewhere" });
   const request = vi
@@ -41,7 +41,7 @@ it("reapplies a semantic mutation to the latest document after one conflict", as
   expect(result.trip.title).toBe("Changed elsewhere");
 });
 
-// @spec TRIP-BE-007
+// @spec TRIP-BE-007, CHAT-BE-007
 it("stops after a second conflict and preserves the draft", async () => {
   const request = vi
     .fn()

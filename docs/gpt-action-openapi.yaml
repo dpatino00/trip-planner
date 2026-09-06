@@ -1,54 +1,16 @@
 openapi: 3.1.0
 info:
   title: Private Trip Companion
-  version: 1.0.0
+  version: 1.0.1
   description: Update one private shared trip through explicit operations.
 servers:
-  - url: https://YOUR_DEPLOYED_HOST
+  - url: https://trip-planner-dpatino.vercel.app
 components:
   securitySchemes:
     actionKey:
       type: http
       scheme: bearer
-  parameters:
-    TripToken:
-      name: X-Trip-Token
-      in: header
-      required: true
-      description: Private trip token extracted from the user's link fragment. Never repeat it.
-      schema: { type: string }
-    PlaceId:
-      name: placeId
-      in: path
-      required: true
-      schema: { type: string }
-    ProposalId:
-      name: proposalId
-      in: path
-      required: true
-      schema: { type: string }
-  schemas:
-    MutationIdentity:
-      type: object
-      properties:
-        version: { type: integer, minimum: 1 }
-        mutationId: { type: string, format: uuid }
-      required: [version, mutationId]
-    Destination:
-      type: object
-      additionalProperties: false
-      properties:
-        name: { type: string, description: Destination name. }
-        locality: { type: [string, "null"] }
-        countryCode: { type: [string, "null"] }
-        coordinates:
-          type: [object, "null"]
-          properties:
-            latitude: { type: number, minimum: -90, maximum: 90 }
-            longitude: { type: number, minimum: -180, maximum: 180 }
-          required: [latitude, longitude]
-        timeZone: { type: [string, "null"] }
-      required: [name, locality, countryCode, coordinates, timeZone]
+  schemas: {}
 security:
   - actionKey: []
 paths:
@@ -56,81 +18,169 @@ paths:
     get:
       operationId: getTripContext
       description: Retrieve the current trip context before making a mutation.
-      parameters: [{ $ref: '#/components/parameters/TripToken' }]
       responses:
-        '200': { description: Current trip context. }
+        "200": { description: Current trip context. }
+
   /api/actions/trip/destination:
     post:
       operationId: setTripDestination
       description: Set the trip destination using explicit structured context.
-      parameters: [{ $ref: '#/components/parameters/TripToken' }]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              allOf:
-                - { $ref: '#/components/schemas/MutationIdentity' }
-                - type: object
+              type: object
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1 }
+                mutationId: { type: string, format: uuid }
+                destination:
+                  type: object
+                  additionalProperties: false
                   properties:
-                    destination: { $ref: '#/components/schemas/Destination' }
-                  required: [destination]
+                    name: { type: string }
+                    locality: { type: [string, "null"] }
+                    countryCode: { type: [string, "null"] }
+                    coordinates:
+                      type: [object, "null"]
+                      properties:
+                        latitude: { type: number, minimum: -90, maximum: 90 }
+                        longitude: { type: number, minimum: -180, maximum: 180 }
+                      required: [latitude, longitude]
+                    timeZone: { type: [string, "null"] }
+                  required: [name, locality, countryCode, coordinates, timeZone]
+              required: [version, mutationId, destination]
       responses:
-        '200': { description: Updated destination. }
+        "200": { description: Updated destination. }
+
   /api/actions/trip/places:
     post:
       operationId: addPlace
-      description: Save one user-requested place with optional enrichment.
-      parameters: [{ $ref: '#/components/parameters/TripToken' }]
+      description: Save one user-requested place with optional descriptive details and an HTTPS source link.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              allOf:
-                - { $ref: '#/components/schemas/MutationIdentity' }
-                - type: object
+              type: object
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1 }
+                mutationId: { type: string, format: uuid }
+                place:
+                  type: object
+                  additionalProperties: false
                   properties:
-                    place:
-                      type: object
-                      properties:
-                        name: { type: string }
-                        summary: { type: string }
-                        locality: { type: [string, "null"] }
-                        sourceUrl: { type: [string, "null"] }
-                      required: [name]
-                  required: [place]
+                    name: { type: string }
+                    summary: { type: string }
+                    locality: { type: [string, "null"] }
+                    sourceUrl: { type: [string, "null"], format: uri }
+                  required: [name]
+              required: [version, mutationId, place]
       responses:
-        '200': { description: Saved place and any warnings. }
+        "200": { description: Saved place and any warnings. }
+
   /api/actions/trip/places/{placeId}:
     patch:
       operationId: updatePlace
       description: Update allowlisted descriptive fields on one saved place.
       parameters:
-        - { $ref: '#/components/parameters/TripToken' }
-        - { $ref: '#/components/parameters/PlaceId' }
+        - name: placeId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1 }
+                mutationId: { type: string, format: uuid }
+                changes:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    name: { type: string }
+                    summary: { type: string }
+                    locality: { type: [string, "null"] }
+                    sourceUrl: { type: [string, "null"], format: uri }
+              required: [version, mutationId, changes]
       responses:
-        '200': { description: Updated place. }
+        "200": { description: Updated place. }
+
   /api/actions/trip/preferences:
     post:
       operationId: setTripPreferences
       description: Replace the trip's complete preference set.
-      parameters: [{ $ref: '#/components/parameters/TripToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1 }
+                mutationId: { type: string, format: uuid }
+                preferences:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    interests:
+                      type: array
+                      items:
+                        type: string
+                        enum: [coast, outdoors, food, culture, history, wildlife, nightlife, shopping, relaxing]
+                    maximumCost: { type: integer, enum: [0, 1, 2, 3] }
+                    pace: { type: string, enum: [relaxed, balanced, full] }
+                    mobility: { type: string, enum: [standard, low-walking, step-free] }
+                    notes: { type: string }
+                  required: [interests, maximumCost, pace, mobility, notes]
+              required: [version, mutationId, preferences]
       responses:
-        '200': { description: Updated preferences. }
+        "200": { description: Updated preferences. }
+
   /api/actions/trip/optimize:
     post:
       operationId: optimizeTrip
       description: Create a deterministic, reviewable plan proposal without applying it.
-      parameters: [{ $ref: '#/components/parameters/TripToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1 }
+                mutationId: { type: string, format: uuid }
+              required: [version, mutationId]
       responses:
-        '200': { description: Pending proposal or no-useful-change explanation. }
+        "200": { description: Pending proposal or no-useful-change explanation. }
+
   /api/actions/trip/proposals/{proposalId}/apply:
     post:
       operationId: applyPlanProposal
       description: Apply a current proposal only after the user explicitly accepts that identified proposal.
       parameters:
-        - { $ref: '#/components/parameters/TripToken' }
-        - { $ref: '#/components/parameters/ProposalId' }
+        - name: proposalId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1 }
+                mutationId: { type: string, format: uuid }
+              required: [version, mutationId]
       responses:
-        '200': { description: Explicitly accepted proposal applied atomically. }
+        "200": { description: Explicitly accepted proposal applied atomically. }
