@@ -174,6 +174,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-UI-008**: When an Ask response contains a valid saved-place ID, the interface shall render the current authoritative saved place's name, existing summary, useful tags, optional reference link, Apple Maps link, Google Maps link, and directions link in model-ranked order on mobile and desktop layouts.
 - [x] **CHAT-UI-009**: When a traveler activates “View in Ideas” from an Ask saved-match card, the interface shall navigate to that authoritative saved place in Ideas without adding, removing, editing, favoriting, or scheduling any place.
 - [x] **CHAT-UI-010**: When a successful Ask response reports a newer trip version, the interface shall revalidate the authoritative trip and render an automatically added saved-place source as a clickable “Visit source” action.
+- [x] **CHAT-UI-011**: When Ask renders assistant narrative, the interface shall preserve paragraphs, render simple numbered or bulleted lines as lists, convert only HTTPS Markdown links into safe outbound links, and render all other content as escaped text without interpreting raw HTML or unsafe URL schemes.
 
 ## Optimization Proposals
 

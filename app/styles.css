@@ -766,6 +766,21 @@ fieldset {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+.assistant-narrative p,
+.assistant-narrative ol,
+.assistant-narrative ul {
+  margin: 0 0 0.75rem;
+}
+.assistant-narrative ol,
+.assistant-narrative ul {
+  padding-left: 1.35rem;
+}
+.assistant-narrative li + li {
+  margin-top: 0.35rem;
+}
+.assistant-narrative a {
+  font-weight: 800;
+}
 .suggestion-list {
   display: grid;
   gap: 0.7rem;

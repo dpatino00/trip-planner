@@ -209,3 +209,39 @@ it("renders authoritative saved matches in rank order with read-only actions", a
   );
   expect(onViewSavedPlace).toHaveBeenCalledWith("place-tacos");
 });
+
+// @spec CHAT-UI-011
+it("formats assistant paragraphs, lists, and safe markdown links", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({
+      message:
+        "Here are ideas:\n\n1) Torrey Pines\n2) Balboa Park\n\n[See the official guide](https://www.parks.ca.gov/?page_id=657) <strong>safe text</strong>",
+      savedPlaceIds: [],
+      suggestions: [],
+      tripVersion: 1,
+    }),
+  );
+  render(
+    <TripChat
+      token={SHARE_TOKEN}
+      trip={makeTripV2()}
+      online
+      onAddSuggestion={vi.fn()}
+      onViewSavedPlace={vi.fn()}
+    />,
+  );
+
+  const composer = screen.getByLabelText("Ask about this trip");
+  await waitFor(() => expect(composer).toBeEnabled());
+  fireEvent.change(composer, { target: { value: "Suggest some places" } });
+  fireEvent.keyDown(composer, { key: "Enter" });
+
+  const list = await screen.findByRole("list");
+  expect(list).toHaveTextContent("Torrey Pines");
+  expect(list).toHaveTextContent("Balboa Park");
+  expect(
+    screen.getByRole("link", { name: "See the official guide" }),
+  ).toHaveAttribute("href", "https://www.parks.ca.gov/?page_id=657");
+  expect(screen.getByText(/safe text/)).toBeVisible();
+  expect(screen.queryByRole("strong")).toBeNull();
+});

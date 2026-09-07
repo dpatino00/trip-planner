@@ -1,5 +1,6 @@
 import type { ChatSessionMessage } from "@/lib/chat/session";
 import type { SavedPlace, SuggestedPlace } from "@/lib/types";
+import { AssistantMessage } from "@/components/chat/assistant-message";
 import { SavedPlaceCard } from "@/components/chat/saved-place-card";
 import {
   SuggestionCard,
@@ -30,7 +31,11 @@ export function ChatMessage({
       <p className="chat-role">
         {message.role === "user" ? "You" : "Trip companion"}
       </p>
-      <p>{message.content}</p>
+      {message.role === "assistant" ? (
+        <AssistantMessage content={message.content} />
+      ) : (
+        <p>{message.content}</p>
+      )}
       {savedPlaces.length > 0 ? (
         <div className="saved-match-list">
           {savedPlaces.map((place) => (

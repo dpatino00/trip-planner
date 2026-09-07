@@ -670,6 +670,12 @@ directions links before confirmation, plus a supplied source link when present.
 They retain explicit **Add to trip** and session-local **Dismiss** controls and
 expose saved, duplicate, or retry states.
 
+Assistant narrative uses a small allowlisted text formatter rather than raw
+HTML. It preserves paragraphs, recognizes simple numbered or bulleted lines,
+and turns only HTTPS Markdown links into safe outbound links. All other model
+text remains escaped text; raw HTML and non-HTTPS URL schemes are never
+interpreted.
+
 Place cards are content-first rather than photo-first. Each card shows:
 
 - name, locality, summary, and relevant tags;
