@@ -4,15 +4,17 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { TripChat } from "@/components/chat/trip-chat";
+import { saveChatSession } from "@/lib/chat/session";
 import { makeTripV2, SHARE_TOKEN } from "./fixtures";
 
 const suggestion = {
   name: "La Jolla Cove",
-  summary: "Coastal views",
+  summary: "A compact coastal stop for dramatic views and local wildlife.",
   locality: "La Jolla",
   interests: ["coast" as const],
   tags: ["coast"],
@@ -31,6 +33,7 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     Response.json({
       message: "Try this coastal stop.",
+      savedPlaceIds: [],
       suggestions: [suggestion],
     }),
   );
@@ -41,6 +44,7 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
       trip={makeTripV2()}
       online
       onAddSuggestion={onAddSuggestion}
+      onViewSavedPlace={vi.fn()}
     />,
   );
 
@@ -83,18 +87,35 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
 });
 
 // @spec CHAT-UI-006, PWA-UI-007
-it("keeps messages readable but disables generation and confirmation offline", async () => {
+it("restores saved matches while disabling generation and confirmation offline", async () => {
+  await saveChatSession(SHARE_TOKEN, [
+    {
+      id: "stored-match",
+      role: "assistant",
+      content: "This one is already in your trip.",
+      savedPlaceIds: ["place-tacos"],
+      suggestions: [],
+    },
+  ]);
   render(
     <TripChat
       token={SHARE_TOKEN}
       trip={makeTripV2()}
       online={false}
       onAddSuggestion={vi.fn()}
+      onViewSavedPlace={vi.fn()}
     />,
   );
   expect(screen.getByLabelText("Ask about this trip")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   expect(screen.getByText(/Connect to ask/)).toBeVisible();
+  expect(
+    await screen.findByText("This one is already in your trip."),
+  ).toBeVisible();
+  expect(screen.getByText("Oscar's Mexican Seafood")).toBeVisible();
+  expect(screen.getByRole("link", { name: /Apple Maps/ })).toHaveAccessibleName(
+    /requires connection/i,
+  );
 });
 
 // @spec CHAT-UI-005, CHAT-BE-007
@@ -102,6 +123,7 @@ it("retains a suggestion after repeated conflicts so it can be retried", async (
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     Response.json({
       message: "Try this coastal stop.",
+      savedPlaceIds: [],
       suggestions: [suggestion],
     }),
   );
@@ -112,6 +134,7 @@ it("retains a suggestion after repeated conflicts so it can be retried", async (
       trip={makeTripV2()}
       online
       onAddSuggestion={onAddSuggestion}
+      onViewSavedPlace={vi.fn()}
     />,
   );
   const composer = screen.getByLabelText("Ask about this trip");
@@ -126,4 +149,54 @@ it("retains a suggestion after repeated conflicts so it can be retried", async (
   expect(
     screen.getByRole("button", { name: "Retry adding La Jolla Cove to trip" }),
   ).toBeVisible();
+});
+
+// @spec CHAT-UI-002, CHAT-UI-008, CHAT-UI-009
+it("renders authoritative saved matches in rank order with read-only actions", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({
+      message: "You already saved these Mexican-food options.",
+      savedPlaceIds: ["place-tacos", "place-balboa-park"],
+      suggestions: [],
+    }),
+  );
+  const onAddSuggestion = vi.fn();
+  const onViewSavedPlace = vi.fn();
+  render(
+    <TripChat
+      token={SHARE_TOKEN}
+      trip={makeTripV2()}
+      online
+      onAddSuggestion={onAddSuggestion}
+      onViewSavedPlace={onViewSavedPlace}
+    />,
+  );
+  const composer = screen.getByLabelText("Ask about this trip");
+  await waitFor(() => expect(composer).toBeEnabled());
+  fireEvent.change(composer, { target: { value: "Mexican food" } });
+  fireEvent.keyDown(composer, { key: "Enter" });
+
+  const cards = await screen.findAllByTestId("saved-match-card");
+  expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual([
+    "Oscar's Mexican Seafood",
+    "Balboa Park",
+  ]);
+  expect(cards[0]).toHaveTextContent("Casual seafood tacos.");
+  expect(cards[0]).toHaveTextContent("tacos");
+  expect(cards[0]).toHaveTextContent("casual");
+  expect(
+    within(cards[0]).getByRole("link", { name: "Visit source" }),
+  ).toHaveAttribute("href", "https://oscarsmexicanseafood.com/");
+  expect(
+    screen.getAllByRole("link", { name: "Apple Maps" })[0],
+  ).toHaveAttribute("href", expect.stringContaining("maps.apple.com"));
+  expect(screen.queryByRole("button", { name: /add .* to trip/i })).toBeNull();
+  expect(onAddSuggestion).not.toHaveBeenCalled();
+
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "View Oscar's Mexican Seafood in Ideas",
+    }),
+  );
+  expect(onViewSavedPlace).toHaveBeenCalledWith("place-tacos");
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ChatMessage } from "@/components/chat/chat-message";
 import type { SuggestionStatus } from "@/components/chat/suggestion-card";
@@ -21,14 +21,16 @@ interface TripChatProps {
   trip: TripDocument;
   online: boolean;
   onAddSuggestion: (suggestion: SuggestedPlace) => Promise<AddSuggestionResult>;
+  onViewSavedPlace: (placeId: string) => void;
 }
 
-// @spec CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, PWA-UI-007
+// @spec CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-008, CHAT-UI-009, PWA-UI-007
 export function TripChat({
   token,
   trip,
   online,
   onAddSuggestion,
+  onViewSavedPlace,
 }: TripChatProps) {
   const [messages, setMessages] = useState<ChatSessionMessage[]>([]);
   const [composer, setComposer] = useState("");
@@ -38,6 +40,10 @@ export function TripChat({
     {},
   );
   const [hydrated, setHydrated] = useState(false);
+  const placeById = useMemo(
+    () => new Map(trip.places.map((place) => [place.id, place])),
+    [trip.places],
+  );
 
   useEffect(() => {
     let active = true;
@@ -63,6 +69,7 @@ export function TripChat({
       id: crypto.randomUUID(),
       role: "user",
       content: message,
+      savedPlaceIds: [],
       suggestions: [],
     };
     const history = messages
@@ -95,6 +102,7 @@ export function TripChat({
             id: crypto.randomUUID(),
             role: "assistant" as const,
             content: parsed.message,
+            savedPlaceIds: parsed.savedPlaceIds,
             suggestions: parsed.suggestions,
           },
         ].slice(-12),
@@ -157,12 +165,17 @@ export function TripChat({
           <ChatMessage
             key={message.id}
             message={message}
+            savedPlaces={message.savedPlaceIds.flatMap((id) => {
+              const place = placeById.get(id);
+              return place ? [place] : [];
+            })}
             online={online}
             statusFor={(index) => statuses[`${message.id}:${index}`] ?? "idle"}
             onAdd={(suggestion, index) =>
               void addSuggestion(message.id, suggestion, index)
             }
             onDismiss={(index) => dismissSuggestion(message.id, index)}
+            onViewSavedPlace={onViewSavedPlace}
           />
         ))}
         {loading ? (

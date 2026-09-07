@@ -80,6 +80,44 @@ test("adds a reviewed Ask suggestion to Ideas for collaborators without scheduli
   }
 });
 
+// @spec CHAT-BE-002, CHAT-BE-010, CHAT-BE-011, CHAT-UI-008, CHAT-UI-009
+test("finds a saved place from natural language without changing the trip", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend();
+  const originalTrip = structuredClone(backend.getTrip());
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  await page.getByRole("link", { name: "Ask" }).click();
+  await page.getByLabel("Ask about this trip").fill("I'm feeling Mexican food");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const match = page.getByTestId("saved-match-card");
+  await expect(match).toHaveAttribute("aria-label", "Oscar's Mexican Seafood");
+  await expect(match).toContainText("Casual seafood tacos");
+  await expect(match).toContainText(/tacos.*casual/i);
+  await expect(
+    match.getByRole("link", { name: "Visit source" }),
+  ).toHaveAttribute("href", "https://oscarsmexicanseafood.com/");
+  await expect(match.getByRole("link", { name: "Apple Maps" })).toBeVisible();
+  await expect(match.getByRole("link", { name: "Google Maps" })).toBeVisible();
+  await expect(match.getByRole("link", { name: "Directions" })).toBeVisible();
+  await expect(match.getByRole("button", { name: /add .* trip/i })).toHaveCount(
+    0,
+  );
+
+  await match
+    .getByRole("button", { name: "View Oscar's Mexican Seafood in Ideas" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Ideas worth keeping close" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("article", { name: "Oscar's Mexican Seafood" }),
+  ).toBeVisible();
+  expect(backend.getTrip()).toEqual(originalTrip);
+});
+
 // @spec TRIP-UI-001, TRIP-UI-002, TRIP-UI-003
 test("creates a trip after explaining the private link model", async ({
   page,

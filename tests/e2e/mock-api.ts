@@ -43,9 +43,18 @@ export async function mockTripApi(
   await page.route("**/api/conditions**", (route) =>
     json(route, makeConditionsV2()),
   );
-  await page.route("**/api/trip/chat", (route) =>
-    json(route, {
+  await page.route("**/api/trip/chat", (route) => {
+    const request = route.request().postDataJSON() as { message?: string };
+    if (/mexican/i.test(request.message ?? "")) {
+      return json(route, {
+        message: "You already saved a Mexican seafood favorite.",
+        savedPlaceIds: ["place-tacos"],
+        suggestions: [],
+      });
+    }
+    return json(route, {
       message: "La Jolla Cove could fit a relaxed coastal morning.",
+      savedPlaceIds: [],
       suggestions: [
         {
           name: "La Jolla Cove",
@@ -61,8 +70,8 @@ export async function mockTripApi(
           sourceUrl: "https://www.sandiego.gov/lifeguards/beaches/cove",
         },
       ],
-    }),
-  );
+    });
+  });
   await page.route("**/api/trip", async (route) => {
     let trip = backend.getTrip();
     const method = route.request().method();

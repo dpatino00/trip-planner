@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTripChatHandler } from "@/lib/chat/handlers";
 import type { TripChatModel } from "@/lib/chat/model";
+import { tripChatResponseSchema } from "@/lib/chat/schema";
 import { createMemoryRateLimiter } from "@/lib/trips/rate-limit";
 import { createMemoryTripRepository } from "@/lib/trips/repository-memory";
 import { tripKeyForToken } from "@/lib/trips/token";
@@ -45,11 +46,12 @@ async function setup(
   options: {
     model?: TripChatModel | null;
     timeoutMs?: number;
+    trip?: ReturnType<typeof makeTripV2>;
   } = {},
 ) {
   const repository = createMemoryTripRepository();
   await repository.create(tripKeyForToken(SHARE_TOKEN), {
-    trip: makeTripV2(),
+    trip: options.trip ?? makeTripV2(),
     recentMutationIds: [],
   });
   const model =
@@ -58,6 +60,7 @@ async function setup(
           generate: vi.fn().mockResolvedValue({
             output: {
               message: "Try the coast this morning.",
+              savedPlaceIds: [],
               suggestions: [suggestion],
             },
             usage: { inputTokens: 120, outputTokens: 80, totalTokens: 200 },
@@ -98,6 +101,7 @@ it("loads authoritative bounded context, logs metadata, and never mutates the tr
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(await response.json()).toEqual({
     message: "Try the coast this morning.",
+    savedPlaceIds: [],
     suggestions: [suggestion],
   });
   expect(get).toHaveBeenCalledOnce();
@@ -106,8 +110,16 @@ it("loads authoritative bounded context, logs metadata, and never mutates the tr
   expect(remove).not.toHaveBeenCalled();
   const input = vi.mocked(model!.generate).mock.calls[0][0];
   expect(input.context.title).toBe(makeTripV2().title);
+  expect(input.context.places[0]).toMatchObject({
+    id: "place-balboa-park",
+    summary: "Gardens, museums, and architecture.",
+    tags: ["gardens", "museum"],
+  });
   expect(JSON.stringify(input.context)).not.toContain(SHARE_TOKEN);
   expect(input.context).not.toHaveProperty("expiresAt");
+  expect(JSON.stringify(input.context)).not.toMatch(
+    /createdAt|updatedAt|recentMutationIds|trip:v1/,
+  );
   expect(logger).toHaveBeenCalledWith(
     expect.objectContaining({
       event: "trip_chat",
@@ -255,9 +267,9 @@ it("fails closed for configuration, timeout, and malformed model output", async 
   ).toBe(504);
 
   const malformed: TripChatModel = {
-    generate: vi
-      .fn()
-      .mockResolvedValue({ output: { message: "partial", suggestions: [{}] } }),
+    generate: vi.fn().mockResolvedValue({
+      output: { message: "partial", savedPlaceIds: [], suggestions: [{}] },
+    }),
   };
   expect(
     (
@@ -277,6 +289,7 @@ it("keeps web-search sources and removes ungrounded model URLs", async () => {
     generate: vi.fn().mockResolvedValue({
       output: {
         message: "Try this.",
+        savedPlaceIds: [],
         suggestions: [
           { ...suggestion, sourceUrl: trustedUrl },
           {
@@ -299,4 +312,139 @@ it("keeps web-search sources and removes ungrounded model URLs", async () => {
   const body = await response.json();
   expect(body.suggestions[0].sourceUrl).toBe(trustedUrl);
   expect(body.suggestions[1].sourceUrl).toBeNull();
+});
+
+// @spec CHAT-DATA-002, CHAT-BE-002, CHAT-BE-011
+it("returns authoritative saved matches in model order and suppresses new suggestions", async () => {
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "You already saved two good fits.",
+        savedPlaceIds: [
+          "place-tacos",
+          "not-an-authoritative-place",
+          "place-balboa-park",
+        ],
+        suggestions: [suggestion],
+      },
+    }),
+  };
+  const { POST, repository } = await setup({ model });
+  const update = vi.spyOn(repository, "update");
+
+  const response = await POST(
+    chatRequest(
+      { message: "I'm feeling Mexican food", history: [] },
+      { token: SHARE_TOKEN },
+    ),
+  );
+
+  expect(await response.json()).toEqual({
+    message: "You already saved two good fits.",
+    savedPlaceIds: ["place-tacos", "place-balboa-park"],
+    suggestions: [],
+  });
+  expect(update).not.toHaveBeenCalled();
+});
+
+// @spec CHAT-DATA-001, CHAT-DATA-002, CHAT-BE-011
+it("deduplicates model IDs while enforcing uniqueness and summary quality at the public boundary", async () => {
+  const duplicateIds = await setup({
+    model: {
+      generate: vi.fn().mockResolvedValue({
+        output: {
+          message: "Matches",
+          savedPlaceIds: ["place-tacos", "place-tacos"],
+          suggestions: [],
+        },
+      }),
+    },
+  });
+  const duplicateResponse = await duplicateIds.POST(
+    chatRequest({ message: "Mexican", history: [] }, { token: SHARE_TOKEN }),
+  );
+  expect(await duplicateResponse.json()).toMatchObject({
+    savedPlaceIds: ["place-tacos"],
+    suggestions: [],
+  });
+  expect(
+    tripChatResponseSchema.safeParse({
+      message: "Matches",
+      savedPlaceIds: ["place-tacos", "place-tacos"],
+      suggestions: [],
+    }).success,
+  ).toBe(false);
+  expect(
+    tripChatResponseSchema.safeParse({
+      message: "Too many matches",
+      savedPlaceIds: ["one", "two", "three", "four"],
+      suggestions: [],
+    }).success,
+  ).toBe(false);
+  expect(
+    tripChatResponseSchema.safeParse({
+      message: "Invalid tag",
+      savedPlaceIds: [],
+      suggestions: [{ ...suggestion, tags: ["Mexican"] }],
+    }).success,
+  ).toBe(false);
+
+  const weakSummary = await setup({
+    model: {
+      generate: vi.fn().mockResolvedValue({
+        output: {
+          message: "A new idea",
+          savedPlaceIds: [],
+          suggestions: [{ ...suggestion, summary: "Nice" }],
+        },
+      }),
+    },
+  });
+  expect(
+    (
+      await weakSummary.POST(
+        chatRequest(
+          { message: "Something new", history: [] },
+          { token: SHARE_TOKEN },
+        ),
+      )
+    ).status,
+  ).toBe(502);
+});
+
+// @spec CHAT-DATA-003, CHAT-BE-011
+it("accepts matches only from the saved places retained by bounded context", async () => {
+  const base = makeTripV2();
+  const places = Array.from({ length: 21 }, (_, index) => ({
+    ...base.places[index % base.places.length],
+    id: `bounded-place-${index}`,
+    name: `Bounded place ${index}`,
+  }));
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "No bounded match.",
+        savedPlaceIds: ["bounded-place-20"],
+        suggestions: [suggestion],
+      },
+    }),
+  };
+  const { POST } = await setup({ model, trip: { ...base, places } });
+
+  const response = await POST(
+    chatRequest(
+      { message: "Find the last place", history: [] },
+      { token: SHARE_TOKEN },
+    ),
+  );
+
+  expect(await response.json()).toMatchObject({
+    savedPlaceIds: [],
+    suggestions: [suggestion],
+  });
+  const context = vi.mocked(model.generate).mock.calls[0][0].context;
+  expect(context.places).toHaveLength(20);
+  expect(context.places.some((place) => place.id === "bounded-place-20")).toBe(
+    false,
+  );
 });

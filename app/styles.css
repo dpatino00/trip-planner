@@ -771,6 +771,21 @@ fieldset {
   gap: 0.7rem;
   margin-top: 0.9rem;
 }
+.saved-match-list {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.9rem;
+}
+.saved-match-card {
+  min-width: 0;
+  border: 1px solid var(--navy);
+  border-radius: 16px;
+  background: var(--seafoam);
+  padding: 0.9rem;
+}
+.saved-match-card h3 {
+  margin-bottom: 0.2rem;
+}
 .suggestion-card {
   border: 1px solid var(--navy);
   border-radius: 16px;

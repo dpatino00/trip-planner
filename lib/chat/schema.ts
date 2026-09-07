@@ -19,11 +19,18 @@ const daypartSchema = z.enum([
   "evening",
 ]);
 
-// @spec CHAT-DATA-001
+const savedPlaceIdsSchema = z.array(z.string().trim().min(1).max(120)).max(3);
+
+function hasOneOrTwoSentences(value: string) {
+  const endings = value.match(/[.!?](?:\s|$)/g)?.length ?? 0;
+  return endings >= 1 && endings <= 2;
+}
+
+// @spec CHAT-DATA-001, CHAT-DATA-002
 export const suggestedPlaceSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
-    summary: z.string().max(500),
+    summary: z.string().trim().min(20).max(500).refine(hasOneOrTwoSentences),
     locality: z.string().trim().min(1).max(120).nullable(),
     interests: z
       .array(interestSchema)
@@ -48,6 +55,19 @@ export const suggestedPlaceSchema = z
 export const tripChatResponseSchema = z
   .object({
     message: z.string().trim().min(1).max(2000),
+    savedPlaceIds: savedPlaceIdsSchema.refine(
+      (values) => new Set(values).size === values.length,
+    ),
+    suggestions: z.array(suggestedPlaceSchema).max(3),
+  })
+  .strict();
+
+// Model candidates permit duplicate IDs so the authoritative handler can
+// silently normalize them before validating the public response contract.
+export const tripChatCandidateResponseSchema = z
+  .object({
+    message: z.string().trim().min(1).max(2000),
+    savedPlaceIds: savedPlaceIdsSchema,
     suggestions: z.array(suggestedPlaceSchema).max(3),
   })
   .strict();
@@ -74,7 +94,8 @@ const suggestedPlaceModelSchema = z
 export const tripChatModelResponseSchema = z
   .object({
     message: z.string(),
-    suggestions: z.array(suggestedPlaceModelSchema),
+    savedPlaceIds: z.array(z.string()).max(3),
+    suggestions: z.array(suggestedPlaceModelSchema).max(3),
   })
   .strict();
 

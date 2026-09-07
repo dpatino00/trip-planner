@@ -13,11 +13,11 @@ experience. Maintaining that plan through forms also becomes tedious as ideas
 emerge naturally in conversation.
 
 The Trip Companion will be a mobile-first shared trip website with an embedded
-Ask experience. Travelers can ask for contextual advice and receive reviewable
-place suggestions without leaving the trip. Only an explicit Add to trip action
-mutates the shared plan, which remains the visual and durable source of truth. A
-private Custom GPT may continue to use authenticated Actions as an optional
-secondary client.
+Ask experience. Travelers can ask for contextual advice and receive relevant
+saved places before reviewable new-place suggestions without leaving the trip.
+Only an explicit Add to trip action mutates the shared plan, which remains the
+visual and durable source of truth. A private Custom GPT may continue to use
+authenticated Actions as an optional secondary client.
 
 ## Goals
 
@@ -25,7 +25,8 @@ secondary client.
 - Support arbitrary trip destinations and traveler-supplied places rather than a
   San Diego-only catalog.
 - Let travelers ask an embedded AI for trip-aware narrative advice and
-  reviewable place suggestions.
+  discover relevant saved places before receiving reviewable new-place
+  suggestions.
 - Require explicit confirmation before an AI suggestion changes shared state.
 - Preserve authenticated Custom GPT Actions as an optional secondary client.
 - Turn conversational requests into structured place ideas, preferences,
@@ -50,6 +51,8 @@ secondary client.
 ## Non-Goals
 
 - Persisting chat history as shared trip data or across browser sessions.
+- Adding embeddings, a vector database, background place enrichment, a separate
+  search provider, or a second Ask endpoint for saved-place discovery.
 - Allowing the embedded model to use tools other than one bounded web search for
   place-reference links, or to directly mutate a trip.
 - Allowing the GPT to edit application code, deploy the website, make bookings,
@@ -114,10 +117,14 @@ Deployment: Pixi task → Vercel CLI → Vercel preview/production
 The Next.js App Router application will serve the interface, destination-neutral
 place data, same-origin trip and chat endpoints, and a small public Action API.
 The chat endpoint authenticates the share token, loads an authoritative compact
-trip context, and asks the OpenAI Responses API for narrative advice and up to
-three structured place suggestions. One bounded web-search call may find HTTPS
-reference links for those suggestions; no mutation tools are configured. The browser sends
-an explicit, versioned trip mutation only after a traveler chooses Add to trip.
+trip context containing saved-place IDs and descriptions, and asks the OpenAI
+Responses API for narrative advice plus up to three ranked saved-place IDs. When
+the model finds no useful saved match, it may instead return up to three
+structured new-place suggestions and use one bounded web-search call to find
+HTTPS reference links for them. The server validates every returned ID against
+the authoritative bounded trip context, and no mutation tools are configured.
+The browser sends an explicit, versioned trip mutation only after a traveler
+chooses Add to trip for a new suggestion.
 
 The Action API will require a dedicated, revocable integration key configured as
 the Custom GPT Action's API-key credential. This key is distinct from an OpenAI
@@ -159,6 +166,8 @@ live, stale, and unavailable data.
 | Support custom places from conversation | Travelers can plan any destination without waiting for a hardcoded catalog. Structured fields keep GPT output testable. | One destination-specific catalog, a mandatory paid place-search API. |
 | Make embedded Ask the primary conversational surface | Travelers retain trip context and review suggestions in one mobile flow; the model remains a read-only authenticated client until explicit confirmation. | Custom GPT Actions only, manual copy and paste. |
 | Keep chat session-local | Conversation content is not shared trip state and is limited to the current browser tab, reducing storage and privacy risk. | Server-side conversation history, durable browser history. |
+| Rank saved places in the existing structured model response | Natural-language requests can reuse saved summaries and normalized tags with one model request; authoritative IDs let the server and UI render current trip data without accepting model-generated copies. | Embeddings, vector search, deterministic keyword ranking, a second model request. |
+| Fall back to bounded web search only when no saved place matches | Existing decisions remain primary and avoid unnecessary discovery calls; new sourced suggestions remain available when the trip has no useful match. | Always combining saved and new places, always invoking web search. |
 | Use strict Structured Outputs for suggestions | A validated transport shape prevents malformed model data from reaching mutation code, while narrative plan advice avoids a competing proposal schema. | Free-form extraction, model-created plan proposals. |
 | Use a dedicated Action API key for the private MVP | It is the smallest supported authentication model for an owner-operated GPT and remains separate from OpenAI and trip-sharing credentials. | No Action authentication, OAuth in the first release. |
 | Keep optimization deterministic and proposal-based | Results remain explainable and testable; confirmed plans are not silently rearranged. | An autonomous AI worker that directly rewrites the itinerary. |

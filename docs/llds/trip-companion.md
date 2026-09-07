@@ -360,9 +360,12 @@ history is capped at 8,000 characters. Bodies above 16 KiB are rejected.
 
 The client never submits a trip document. After authentication, the route loads
 the authoritative trip and constructs a compact context containing title,
-destination, dates, preferences, capped saved-place summaries, itinerary items,
-and a pending-proposal summary. Tokens, internal keys, expiry metadata, and
-unnecessary timestamps are excluded, and serialized context is capped.
+destination, dates, preferences, capped saved-place IDs and summaries, itinerary
+items, and a pending-proposal summary. Each included place carries only its ID,
+name, summary, locality, interests, normalized tags, profile, and source URL.
+Tokens, internal keys, expiry metadata, and unrelated timestamps are excluded,
+and serialized context is capped. For trips above the cap, saved-place matching
+is limited to the places that remain in this bounded context.
 
 ```ts
 interface SuggestedPlace {
@@ -381,15 +384,32 @@ interface SuggestedPlace {
 
 interface TripChatResponse {
   message: string;
+  savedPlaceIds: string[];
   suggestions: SuggestedPlace[];
 }
 ```
 
 All strict Structured Output properties are required; nullable properties
 represent optional concepts. The response message is at most 2,000 characters
-and suggestions are capped at three. `sourceUrl` is null unless the same exact
-HTTPS URL appeared in authoritative trip/user context or the current response's
-bounded web-search sources, and is always labeled as a reference.
+and both saved-place IDs and suggestions are capped at three. Saved-place IDs
+must be unique and ordered from most to least relevant. The route silently
+discards IDs that are duplicated, absent from the bounded context, or absent
+from the authoritative trip while preserving the model's ranking order. If at
+least one valid saved-place ID remains, the route returns those IDs and an empty
+suggestions array even when the model supplied suggestions. Otherwise it returns
+the validated suggestions. `sourceUrl` is null unless the same exact HTTPS URL
+appeared in authoritative trip/user context or the current response's bounded
+web-search sources, and is always labeled as a reference.
+
+The model is instructed to match the request against saved-place names,
+summaries, interests, and normalized tags first. When a useful saved match
+exists, it returns only ranked `savedPlaceIds` and does not invoke web search.
+When no useful saved match exists, it returns no saved IDs and may use the
+existing single bulk web search for up to three new suggestions. Every new
+suggestion has a concise one- or two-sentence summary describing what the place
+is, why someone might visit, and the relevant character, cuisine, or experience;
+its tags use normalized lower-case search terms such as `mexican`, `seafood`,
+`casual`, or `outdoor`.
 
 The injected `TripChatModel` production adapter uses the OpenAI Node SDK,
 `responses.parse()` with `zodTextFormat`, `store: false`, the configured
@@ -492,12 +512,15 @@ credentials in rate-limit keys.
 
 ### Ask about a trip
 
-The Ask tab keeps a versioned maximum of twelve messages in `sessionStorage`
+The Ask tab keeps a version-2 maximum of twelve messages in `sessionStorage`
 under a SHA-256-derived trip key and sends only the most recent eight text
-messages. The exact trip token is removed before persistence and is rejected if
-submitted to the server. Dismissing a suggestion is session-local and performs
-no mutation. Adding a suggestion uses conflict reconciliation, updates SWR and
-the IndexedDB snapshot, and adds only to Ideas—not the itinerary. Planning
+messages. Each assistant message stores ranked saved-place IDs as well as new
+suggestions. Version-1 ephemeral chat data is discarded rather than migrated.
+The exact trip token is removed before persistence and is rejected if submitted
+to the server. Dismissing a suggestion is session-local and performs no
+mutation. Adding a suggestion uses conflict reconciliation, updates SWR and the
+IndexedDB snapshot, and adds only to Ideas—not the itinerary. Saved matches are
+read-only and never add, edit, remove, favorite, or schedule a place. Planning
 questions receive narrative guidance that points travelers to the existing Plan
 proposal workflow; embedded Ask never creates a `PlanProposal`.
 
@@ -565,9 +588,15 @@ status or personal safety.
 The visual system remains warm, playful, accessible, and mobile-first. The
 primary navigation uses **Today**, **Ideas**, **Plan**, and **Ask**.
 
-Ask owns its composer, loading, error, messages, and inline suggestion cards.
-Enter submits, Shift+Enter inserts a newline, and generation/add controls are
-disabled offline. Suggestion cards provide generated Apple Maps, Google Maps,
+Ask owns its composer, loading, error, messages, inline saved-match cards, and
+inline suggestion cards. Enter submits, Shift+Enter inserts a newline, and
+generation/add controls are disabled offline. Saved-match cards resolve IDs
+against the current authoritative trip in the browser and display the saved
+name, existing summary, useful tags, optional reference, Maps and directions
+links, and a lightweight **View in Ideas** action. They expose no mutation or
+scheduling controls and remain readable offline, with external links labeled as
+requiring connection. If a saved place is no longer present, its stale session
+ID renders no card. Suggestion cards provide generated Apple Maps, Google Maps,
 and Google Maps directions links before confirmation, plus a supplied source
 link when present. They retain explicit **Add to trip** and session-local
 **Dismiss** controls and expose saved, duplicate, or retry states.

@@ -2,6 +2,7 @@ import { buildTripChatContext } from "@/lib/chat/context";
 import type { TripChatModel, TripChatUsage } from "@/lib/chat/model";
 import { TripChatInvalidOutputError } from "@/lib/chat/model";
 import {
+  tripChatCandidateResponseSchema,
   tripChatRequestSchema,
   tripChatResponseSchema,
 } from "@/lib/chat/schema";
@@ -111,7 +112,7 @@ async function withTimeout<T>(
   }
 }
 
-// @spec CHAT-API-001, CHAT-API-002, CHAT-API-003, CHAT-API-004, CHAT-API-005, CHAT-API-006, CHAT-API-007, CHAT-API-008, CHAT-API-009, CHAT-API-010, CHAT-BE-002, CHAT-BE-008
+// @spec CHAT-API-001, CHAT-API-002, CHAT-API-003, CHAT-API-004, CHAT-API-005, CHAT-API-006, CHAT-API-007, CHAT-API-008, CHAT-API-009, CHAT-API-010, CHAT-BE-002, CHAT-BE-008, CHAT-BE-011
 export function createTripChatHandler({
   repository,
   rateLimiter,
@@ -207,7 +208,8 @@ export function createTripChatHandler({
     let upstreamCode: string | undefined;
     let usage: TripChatUsage | undefined;
     try {
-      const context = buildTripChatContext(migrateTripDocument(stored.trip));
+      const trip = migrateTripDocument(stored.trip);
+      const context = buildTripChatContext(trip);
       const generated = await withTimeout(
         (signal) =>
           model.generate({
@@ -219,25 +221,43 @@ export function createTripChatHandler({
         timeoutMs,
       );
       usage = generated.usage;
-      const output = tripChatResponseSchema.safeParse(generated.output);
+      const output = tripChatCandidateResponseSchema.safeParse(
+        generated.output,
+      );
       if (!output.success)
         throw new TripChatInvalidOutputError("Invalid model output");
+      const boundedIds = new Set(context.places.map((place) => place.id));
+      const authoritativeIds = new Set(trip.places.map((place) => place.id));
+      const savedPlaceIds = output.data.savedPlaceIds.filter(
+        (id, index, ids) =>
+          ids.indexOf(id) === index &&
+          boundedIds.has(id) &&
+          authoritativeIds.has(id),
+      );
       const permittedUrls = suppliedHttpsUrls([
         JSON.stringify(context),
         parsed.data.message,
         ...parsed.data.history.map((item) => item.content),
         ...(generated.sources ?? []),
       ]);
-      return result({
-        ...output.data,
-        suggestions: output.data.suggestions.map((suggestion) => ({
-          ...suggestion,
-          sourceUrl:
-            suggestion.sourceUrl && permittedUrls.has(suggestion.sourceUrl)
-              ? suggestion.sourceUrl
-              : null,
-        })),
+      const response = tripChatResponseSchema.safeParse({
+        message: output.data.message,
+        savedPlaceIds,
+        suggestions:
+          savedPlaceIds.length > 0
+            ? []
+            : output.data.suggestions.map((suggestion) => ({
+                ...suggestion,
+                sourceUrl:
+                  suggestion.sourceUrl &&
+                  permittedUrls.has(suggestion.sourceUrl)
+                    ? suggestion.sourceUrl
+                    : null,
+              })),
       });
+      if (!response.success)
+        throw new TripChatInvalidOutputError("Invalid normalized model output");
+      return result(response.data);
     } catch (cause) {
       if (cause && typeof cause === "object") {
         if ("status" in cause && typeof cause.status === "number")

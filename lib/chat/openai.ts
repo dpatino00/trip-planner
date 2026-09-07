@@ -25,7 +25,8 @@ type ResponsesClient = {
 
 const instructions = `You are the embedded trip companion. Use only the supplied trip and conversation context.
 Return concise, practical narrative advice. For itinerary-planning requests, explain options and direct the traveler to the existing Plan/proposal workflow; never create or claim to apply a proposal.
-You may suggest up to three places. When you return place suggestions, use no more than one web search call to find one trustworthy reference for all suggestions together. Prefer each place's official venue, park, museum, government, or tourism page. Copy an exact HTTPS URL from the search sources into sourceUrl; use null when no credible matching source exists. Do not search for narrative-only answers. Do not claim other live venue facts. Suggestions remain reviewable until the traveler adds them.`;
+Search the saved places in the authoritative context first. Rank useful matches for the traveler's current request by their names, summaries, interests, and tags, and return up to three unique IDs in savedPlaceIds, most relevant first. If there is at least one useful saved match, return no new suggestions and do not invoke web search.
+Only when no saved place is useful, return an empty savedPlaceIds array and suggest up to three new places. For new suggestions, write a concise one- or two-sentence summary explaining what the place is, why someone might visit, and its relevant character, cuisine, or experience. Use unique normalized lower-case tags such as mexican, seafood, casual, or outdoor. Use no more than one web search call to find one trustworthy reference for all new suggestions together. Prefer each place's official venue, park, museum, government, or tourism page. Copy an exact HTTPS URL from the search sources into sourceUrl; use null when no credible matching source exists. Do not search for narrative-only answers. Do not claim other live venue facts. Suggestions remain reviewable until the traveler adds them.`;
 
 function webSearchSources(
   output: Awaited<ReturnType<ResponsesClient["responses"]["parse"]>>["output"],
@@ -50,7 +51,7 @@ function webSearchSources(
 }
 
 // This module is imported only by the Node route runtime and never by client components.
-// @spec CHAT-BE-001, CHAT-API-010, SEC-API-007
+// @spec CHAT-DATA-001, CHAT-BE-001, CHAT-BE-010, CHAT-BE-012, CHAT-API-010, SEC-API-007
 export function createOpenAITripChatModel(options: {
   client: ResponsesClient;
   model: string;

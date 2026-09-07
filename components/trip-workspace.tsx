@@ -397,6 +397,20 @@ export function TripWorkspace() {
     history.replaceState(null, "", `?${params.toString()}#${token}`);
   }
 
+  // @spec CHAT-UI-009
+  function viewSavedPlace(placeId: string) {
+    const place = placeById.get(placeId);
+    if (!place) return;
+    setView("ideas");
+    setSearch(place.name);
+    setInterest("");
+    const params = new URLSearchParams(window.location.search);
+    params.set("view", "ideas");
+    params.set("search", place.name);
+    params.delete("interest");
+    history.pushState(null, "", `?${params.toString()}#${token}`);
+  }
+
   async function performMutation(mutation: TripApiMutation, draft?: unknown) {
     if (!trip || !token || isOffline) return { status: "error" as const };
     setMutationError("");
@@ -1019,6 +1033,7 @@ export function TripWorkspace() {
             trip={trip}
             online={!isOffline}
             onAddSuggestion={addSuggestedPlace}
+            onViewSavedPlace={viewSavedPlace}
           />
         )}
       </main>

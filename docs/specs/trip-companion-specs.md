@@ -123,10 +123,10 @@ active gap introduced or changed by the approved conversational design.
 
 ## Embedded Ask Data and API
 
-- [x] **CHAT-DATA-001**: Each embedded Ask place suggestion shall contain the required name, summary, nullable locality, unique valid interests, no more than ten normalized tags, profile, unique valid dayparts, nullable duration, nullable cost, nullable reservation recommendation, and nullable HTTPS source URL fields.
-- [x] **CHAT-DATA-002**: The embedded Ask response shall contain a message of no more than 2,000 characters and no more than three valid place suggestions.
-- [x] **CHAT-DATA-003**: The embedded Ask model context shall include bounded authoritative trip details while excluding share tokens, storage identifiers, expiry metadata, and unnecessary timestamps.
-- [x] **CHAT-DATA-004**: The embedded Ask browser shall retain no more than twelve versioned text messages in session storage under a SHA-256-derived trip key that excludes the raw token.
+- [x] **CHAT-DATA-001**: Each embedded Ask new-place suggestion shall contain the required name, concise one- or two-sentence descriptive summary, nullable locality, unique valid interests, no more than ten unique normalized lower-case tags, profile, unique valid dayparts, nullable duration, nullable cost, nullable reservation recommendation, and nullable HTTPS source URL fields.
+- [x] **CHAT-DATA-002**: The embedded Ask response shall contain a message of no more than 2,000 characters, no more than three unique ranked saved-place IDs, and no more than three valid new-place suggestions.
+- [x] **CHAT-DATA-003**: The embedded Ask model context shall include IDs, summaries, and normalized tags for each saved place retained in the bounded authoritative trip details while excluding share tokens, storage identifiers, expiry metadata, and unnecessary timestamps.
+- [x] **CHAT-DATA-004**: The embedded Ask browser shall retain no more than twelve version-2 text messages, saved-place ID lists, and suggestion lists in session storage under a SHA-256-derived trip key that excludes the raw token, and shall discard data from earlier session versions.
 - [x] **CHAT-API-001**: When the embedded Ask API receives a valid bearer token, a 1–2,000 character message, and no more than eight bounded history messages, the system shall load the authoritative trip and return a no-store validated Ask response.
 - [x] **CHAT-API-002**: If the embedded Ask API receives missing or malformed bearer authentication, then the system shall return status 401 before reading trip storage.
 - [x] **CHAT-API-003**: If the embedded Ask API receives an unknown or expired trip token, then the system shall return status 404.
@@ -146,16 +146,21 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-BE-007**: If the confirmed-suggestion mutation conflicts twice, then the browser shall retain the suggestion for another explicit retry.
 - [x] **CHAT-BE-008**: When embedded Ask completes a model request, the system shall log only request metadata, hashed trip identity, duration, status, configured model, and returned token usage.
 - [x] **CHAT-BE-009**: When embedded Ask returns a suggestion source URL, the system shall retain it only when the exact HTTPS URL appeared in the current web-search sources or trusted trip/user context.
+- [x] **CHAT-BE-010**: When the embedded Ask model finds useful saved places for the traveler's current request, it shall return at most three of their IDs in relevance order, return no new-place suggestions, and not invoke web search.
+- [x] **CHAT-BE-011**: When embedded Ask receives model-ranked saved-place IDs, the system shall preserve their first-occurrence order, silently discard duplicates and IDs outside both the bounded context and authoritative trip, and suppress all new-place suggestions if at least one valid ID remains.
+- [x] **CHAT-BE-012**: When the embedded Ask model finds no useful saved place in the bounded context, it shall return no saved-place IDs and retain the existing single bulk web-search workflow for sourced new-place suggestions.
 
 ## Embedded Ask Interface
 
 - [x] **CHAT-UI-001**: The trip workspace shall provide Ask as the fourth mobile-bottom and wide-screen-side navigation destination.
-- [x] **CHAT-UI-002**: When a traveler submits Ask with Enter or the send control, the interface shall append the user message, show a loading state, and render the returned assistant message and inline suggestions.
+- [x] **CHAT-UI-002**: When a traveler submits Ask with Enter or the send control, the interface shall append the user message, show a loading state, and render the returned assistant message plus inline saved matches or new-place suggestions.
 - [x] **CHAT-UI-003**: When Shift+Enter is pressed in the Ask composer, the interface shall insert a newline without submitting.
 - [x] **CHAT-UI-004**: When a traveler dismisses an Ask suggestion, the interface shall remove only that session-local card without mutating the trip.
 - [x] **CHAT-UI-005**: When a traveler adds an Ask suggestion, the interface shall expose saved, duplicate, retryable-conflict, or error status and retain the card when retry is possible.
-- [x] **CHAT-UI-006**: While the workspace is offline, the Ask composer and suggestion-add controls shall be disabled while prior session messages remain readable.
+- [x] **CHAT-UI-006**: While the workspace is offline, the Ask composer and suggestion-add controls shall be disabled while prior session messages and saved-match details remain readable.
 - [x] **CHAT-UI-007**: When an Ask response contains a place suggestion, the interface shall display generated Apple Maps, Google Maps, and directions actions before the traveler adds it to the trip, and shall display a “Learn more” HTTPS source link when one is present.
+- [x] **CHAT-UI-008**: When an Ask response contains a valid saved-place ID, the interface shall render the current authoritative saved place's name, existing summary, useful tags, optional reference link, Apple Maps link, Google Maps link, and directions link in model-ranked order on mobile and desktop layouts.
+- [x] **CHAT-UI-009**: When a traveler activates “View in Ideas” from an Ask saved-match card, the interface shall navigate to that authoritative saved place in Ideas without adding, removing, editing, favoriting, or scheduling any place.
 
 ## Optimization Proposals
 

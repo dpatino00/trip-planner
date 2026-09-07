@@ -5,12 +5,16 @@ import { expect, it, vi } from "vitest";
 import { createOpenAITripChatModel } from "@/lib/chat/openai";
 import { makeTripV2 } from "./fixtures";
 
-// @spec CHAT-BE-001, CHAT-BE-003, CHAT-BE-009, CHAT-API-010, SEC-API-007
+// @spec CHAT-DATA-001, CHAT-BE-001, CHAT-BE-003, CHAT-BE-009, CHAT-BE-010, CHAT-BE-012, CHAT-API-010, SEC-API-007
 it("uses strict Responses parsing with one bounded web search", async () => {
   const sourceUrl = "https://www.sandiego.gov/lifeguards/beaches/cove";
   const parse = vi.fn().mockResolvedValue({
     status: "completed",
-    output_parsed: { message: "A concise answer", suggestions: [] },
+    output_parsed: {
+      message: "A concise answer",
+      savedPlaceIds: [],
+      suggestions: [],
+    },
     output: [
       {
         type: "web_search_call",
@@ -59,8 +63,17 @@ it("uses strict Responses parsing with one bounded web search", async () => {
   expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
     /official.*reference/i,
   );
+  expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
+    /saved.*first|saved.*before/i,
+  );
+  expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
+    /saved match.*do not.*web search/i,
+  );
+  expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
+    /one- or two-sentence.*summary.*normalized.*tags/i,
+  );
   expect(result).toEqual({
-    output: { message: "A concise answer", suggestions: [] },
+    output: { message: "A concise answer", savedPlaceIds: [], suggestions: [] },
     sources: [sourceUrl],
     usage: { inputTokens: 42, outputTokens: 12, totalTokens: 54 },
   });

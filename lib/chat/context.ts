@@ -6,6 +6,7 @@ export interface TripChatContext {
   dates: { start: string; end: string };
   preferences: TripDocument["preferences"];
   places: Array<{
+    id: string;
     name: string;
     summary: string;
     locality: string | null;
@@ -27,7 +28,7 @@ function compactText(value: string, maximum: number) {
   return value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`;
 }
 
-// @spec CHAT-DATA-003
+// @spec CHAT-DATA-003, CHAT-BE-011
 export function buildTripChatContext(trip: TripDocument): TripChatContext {
   const names = new Map(trip.places.map((place) => [place.id, place.name]));
   const pending = trip.proposals.find(
@@ -42,6 +43,7 @@ export function buildTripChatContext(trip: TripDocument): TripChatContext {
       notes: compactText(trip.preferences.notes, 500),
     },
     places: trip.places.slice(0, 20).map((place) => ({
+      id: place.id,
       name: place.name,
       summary: compactText(place.summary, 240),
       locality: place.locality,

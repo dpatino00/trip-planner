@@ -10,7 +10,7 @@ import { makeTripV2, SHARE_TOKEN } from "./fixtures";
 
 const suggestion = {
   name: "La Jolla Cove",
-  summary: "A coastal overlook",
+  summary: "A compact coastal overlook for scenery and local wildlife.",
   locality: "La Jolla",
   interests: ["coast", "wildlife"],
   tags: ["coast", "sea lions"],
