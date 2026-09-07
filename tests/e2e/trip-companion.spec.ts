@@ -80,8 +80,33 @@ test("adds a reviewed Ask suggestion to Ideas for collaborators without scheduli
   }
 });
 
+// @spec CHAT-BE-004, CHAT-UI-004, CHAT-UI-005
+test("reconciles a committed suggestion when the first response is interrupted", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend(makeTripV2(), {
+    dropFirstSuggestionResponse: true,
+  });
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  await page.getByRole("link", { name: "Ask" }).click();
+  await page
+    .getByLabel("Ask about this trip")
+    .fill("A relaxed coastal morning?");
+  await page.getByRole("button", { name: "Send" }).click();
+  const suggestion = page.getByRole("article", { name: "La Jolla Cove" });
+  await expect(suggestion).toBeVisible();
+  await suggestion
+    .getByRole("button", { name: "Add La Jolla Cove to trip" })
+    .click();
+  await expect(suggestion.getByText("Saved to Ideas")).toBeVisible();
+  await expect(
+    suggestion.getByText("Could not save this suggestion"),
+  ).toHaveCount(0);
+});
+
 // @spec CHAT-BE-002, CHAT-BE-010, CHAT-BE-011, CHAT-UI-008, CHAT-UI-009
-test("finds a saved place from natural language without changing the trip", async ({
+test("finds an explicitly requested saved place without changing the trip", async ({
   page,
 }) => {
   const backend = createMockTripBackend();
@@ -89,7 +114,9 @@ test("finds a saved place from natural language without changing the trip", asyn
   await mockTripApi(page, backend);
   await page.goto(`/trip#${SHARE_TOKEN}`);
   await page.getByRole("link", { name: "Ask" }).click();
-  await page.getByLabel("Ask about this trip").fill("I'm feeling Mexican food");
+  await page
+    .getByLabel("Ask about this trip")
+    .fill("Show me my saved Mexican ideas");
   await page.getByRole("button", { name: "Send" }).click();
 
   const match = page.getByTestId("saved-match-card");
@@ -116,6 +143,22 @@ test("finds a saved place from natural language without changing the trip", asyn
     page.getByRole("article", { name: "Oscar's Mexican Seafood" }),
   ).toBeVisible();
   expect(backend.getTrip()).toEqual(originalTrip);
+});
+
+// @spec CHAT-BE-020, CHAT-UI-002, CHAT-UI-004, CHAT-UI-005
+test("keeps saved ideas out of general discovery searches", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend();
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  await page.getByRole("link", { name: "Ask" }).click();
+  await page.getByLabel("Ask about this trip").fill("I'm feeling Mexican food");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByTestId("saved-match-card")).toHaveCount(0);
+  await expect(page.getByRole("article", { name: "La Puerta" })).toBeVisible();
+  expect(backend.getTrip()).toEqual(makeTripV2());
 });
 
 // @spec CHAT-BE-002, CHAT-BE-015, CHAT-BE-016, CHAT-BE-019, CHAT-API-011, CHAT-UI-010

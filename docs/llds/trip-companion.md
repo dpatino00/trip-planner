@@ -435,21 +435,23 @@ same validated response with the two original fields (`message` and
 schema from rejecting additive fields while cached tabs age out. It does not
 change model generation, validation, authentication, or cache policy.
 
-The model is instructed to match the request against saved-place names,
-summaries, interests, and normalized tags first. When every useful saved match
+For general discovery, the model suggests new places, excludes exact saved-place
+duplicates, and returns no saved IDs. It returns saved-place IDs only when the
+traveler explicitly asks about saved places, Ideas, the current trip, or adding
+named places. For an explicit saved-place request, it ranks useful matches by
+names, summaries, interests, and normalized tags. When every useful saved match
 already has a source URL, it returns only ranked `savedPlaceIds` and does not
 invoke web search. When a useful match lacks a source URL, it must use the one
 bulk web search to find references for all missing matched-place links together
 and returns the exact ID-to-URL associations as structured source candidates.
-When no useful saved match exists, it returns no saved IDs and must use that same
-single bulk search before returning up to three new suggestions. Each candidate
-identifies its own exact URL from that search in a structured field; placing a
-URL only in `message` is insufficient. The model does not claim that a source
-was persisted because persistence occurs after generation. Every returned new
-suggestion has a concise one- or two-sentence summary describing what the place
-is, why someone might visit, and the relevant character, cuisine, or experience;
-its tags use normalized lower-case search terms such as `mexican`, `seafood`,
-`casual`, or `outdoor`.
+For discovery, it must use that same single bulk search before returning up to
+three new suggestions. Each candidate identifies its own exact URL from that
+search in a structured field; placing a URL only in `message` is insufficient.
+The model does not claim that a source was persisted because persistence occurs
+after generation. Every returned new suggestion has a concise one- or two-
+sentence summary describing what the place is, why someone might visit, and the
+relevant character, cuisine, or experience; its tags use normalized lower-case
+search terms such as `mexican`, `seafood`, `casual`, or `outdoor`.
 
 After validation, the chat handler applies all accepted saved-place source URLs
 in one repository compare-and-set operation. It starts from the latest complete

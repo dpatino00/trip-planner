@@ -427,7 +427,7 @@ it("returns authoritative saved matches in model order and suppresses new sugges
 
   const response = await POST(
     chatRequest(
-      { message: "I'm feeling Mexican food", history: [] },
+      { message: "Show me my saved Mexican ideas", history: [] },
       { token: SHARE_TOKEN },
     ),
   );
@@ -439,6 +439,40 @@ it("returns authoritative saved matches in model order and suppresses new sugges
     tripVersion: 1,
   });
   expect(update).not.toHaveBeenCalled();
+});
+
+// @spec CHAT-BE-020
+it("keeps saved ideas out of general discovery results", async () => {
+  const existingSuggestion = {
+    ...suggestion,
+    name: "Oscar's Mexican Seafood",
+    locality: "Pacific Beach, CA",
+    sourceUrl: trustedSourceUrl,
+  };
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Here are some Mexican options.",
+        savedPlaceIds: ["place-tacos"],
+        savedPlaceSources: [],
+        suggestions: [existingSuggestion],
+      },
+      sources: [trustedSourceUrl],
+    }),
+  };
+  const { POST } = await setup({ model });
+
+  const response = await POST(
+    chatRequest(
+      { message: "I'm feeling Mexican food", history: [] },
+      { token: SHARE_TOKEN },
+    ),
+  );
+
+  expect(await response.json()).toMatchObject({
+    savedPlaceIds: [],
+    suggestions: [],
+  });
 });
 
 // @spec CHAT-DATA-001, CHAT-DATA-002, CHAT-DATA-005, CHAT-BE-011
@@ -456,7 +490,10 @@ it("deduplicates model IDs while enforcing uniqueness and summary quality at the
     },
   });
   const duplicateResponse = await duplicateIds.POST(
-    chatRequest({ message: "Mexican", history: [] }, { token: SHARE_TOKEN }),
+    chatRequest(
+      { message: "Show me my saved Mexican ideas", history: [] },
+      { token: SHARE_TOKEN },
+    ),
   );
   expect(await duplicateResponse.json()).toMatchObject({
     savedPlaceIds: ["place-tacos"],
@@ -580,7 +617,7 @@ it("atomically adds a current-search source to a matched saved place without cha
 
   const response = await POST(
     chatRequest(
-      { message: "Tell me about Torrey Pines", history: [] },
+      { message: "Tell me about my saved Torrey Pines idea", history: [] },
       { token: SHARE_TOKEN },
     ),
   );
@@ -699,7 +736,7 @@ it("retries source enrichment once against a concurrent trip without overwriting
 
   const response = await POST(
     chatRequest(
-      { message: "What about Torrey Pines?", history: [] },
+      { message: "What about my saved Torrey Pines idea?", history: [] },
       { token: SHARE_TOKEN },
     ),
   );
@@ -754,7 +791,7 @@ it("stops after two source-enrichment conflicts and returns the latest trip vers
 
   const response = await POST(
     chatRequest(
-      { message: "What about Torrey Pines?", history: [] },
+      { message: "What about my saved Torrey Pines idea?", history: [] },
       { token: SHARE_TOKEN },
     ),
   );

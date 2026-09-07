@@ -65,7 +65,7 @@ it("uses strict Responses parsing with one bounded web search", async () => {
     /official.*reference/i,
   );
   expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
-    /saved.*first|saved.*before/i,
+    /general discovery.*new places|explicitly asks.*saved/i,
   );
   expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
     /saved match.*missing.*source URL.*must.*web search/i,

@@ -13,8 +13,9 @@ experience. Maintaining that plan through forms also becomes tedious as ideas
 emerge naturally in conversation.
 
 The Trip Companion will be a mobile-first shared trip website with an embedded
-Ask experience. Travelers can ask for contextual advice and receive relevant
-saved places before reviewable new-place suggestions without leaving the trip.
+Ask experience. Travelers can ask for contextual advice and receive reviewable
+new-place suggestions without leaving the trip; saved ideas are surfaced when
+the traveler explicitly asks about them.
 Only an explicit Add to trip action adds a new place to the shared plan. The
 single narrow exception is source-link enrichment: when Ask returns a saved
 place whose source URL is missing, it automatically attaches an exact HTTPS
@@ -27,9 +28,9 @@ authenticated Actions as an optional secondary client.
 - Make a useful recommendation available within seconds of opening the app.
 - Support arbitrary trip destinations and traveler-supplied places rather than a
   San Diego-only catalog.
-- Let travelers ask an embedded AI for trip-aware narrative advice and
-  discover relevant saved places before receiving reviewable new-place
-  suggestions.
+- Let travelers ask an embedded AI for trip-aware narrative advice and discover
+  new places without repeating ideas already saved, while supporting explicit
+  saved-place and add-to-trip requests.
 - Require explicit confirmation before an AI suggestion changes shared state.
 - Automatically add a search-grounded reference link to a matched saved place
   when that place has no source URL, without overwriting existing links or
@@ -125,14 +126,15 @@ The Next.js App Router application will serve the interface, destination-neutral
 place data, same-origin trip and chat endpoints, and a small public Action API.
 The chat endpoint authenticates the share token, loads an authoritative compact
 trip context containing saved-place IDs and descriptions, and asks the OpenAI
-Responses API for narrative advice plus up to three ranked saved-place IDs. A
-saved match with no source URL causes the same request to use its one bounded
-web-search call to find an exact HTTPS reference. When the model finds no useful
-saved match, it may instead return up to three structured new-place suggestions
-after using that bounded search. Every returned new-place suggestion includes an
-exact HTTPS reference URL from that search so the traveler can inspect the
-source before saving; candidates without credible search evidence are omitted
-rather than rendered as unsourced cards.
+Responses API for narrative advice plus up to three structured new-place
+suggestions for general discovery. Saved-place IDs are returned only when the
+traveler explicitly asks about saved places, Ideas, the current trip, or adding
+named places; exact saved-place duplicates are excluded from discovery results.
+A requested saved match with no source URL causes the same request to use its one
+bounded web-search call to find an exact HTTPS reference. Every returned
+new-place suggestion includes an exact HTTPS reference URL from that search so
+the traveler can inspect the source before saving; candidates without credible
+search evidence are omitted rather than rendered as unsourced cards.
 
 The server validates every returned ID and source against the authoritative trip
 and the current response's search evidence. For a matched saved place with a

@@ -8,16 +8,24 @@ type MockTrip = ReturnType<typeof makeTripV2>;
 export interface MockTripBackend {
   getTrip: () => MockTrip;
   setTrip: (trip: MockTrip) => void;
+  consumeDroppedSuggestionResponse: () => boolean;
 }
 
 export function createMockTripBackend(
   initial: MockTrip = makeTripV2(),
+  options: { dropFirstSuggestionResponse?: boolean } = {},
 ): MockTripBackend {
   let trip = initial;
+  let dropSuggestionResponse = options.dropFirstSuggestionResponse ?? false;
   return {
     getTrip: () => trip,
     setTrip: (next) => {
       trip = next;
+    },
+    consumeDroppedSuggestionResponse: () => {
+      const shouldDrop = dropSuggestionResponse;
+      dropSuggestionResponse = false;
+      return shouldDrop;
     },
   };
 }
@@ -65,11 +73,37 @@ export async function mockTripApi(
         tripVersion: trip.version,
       });
     }
-    if (/mexican/i.test(request.message ?? "")) {
+    if (
+      /mexican/i.test(request.message ?? "") &&
+      /saved|ideas|add|include/i.test(request.message ?? "")
+    ) {
       return json(route, {
         message: "You already saved a Mexican seafood favorite.",
         savedPlaceIds: ["place-tacos"],
         suggestions: [],
+        tripVersion: backend.getTrip().version,
+      });
+    }
+    if (/mexican/i.test(request.message ?? "")) {
+      return json(route, {
+        message: "Here are some new Mexican options to consider.",
+        savedPlaceIds: [],
+        suggestions: [
+          {
+            name: "La Puerta",
+            summary:
+              "A lively Gaslamp Mexican restaurant for tacos and drinks.",
+            locality: "Gaslamp",
+            interests: ["food"],
+            tags: ["mexican", "tacos", "casual"],
+            profile: "indoor",
+            preferredDayparts: ["evening"],
+            durationMinutes: 90,
+            costLevel: 2,
+            reservationRecommended: false,
+            sourceUrl: "https://gaslamp.org/listing/la-puerta/",
+          },
+        ],
         tripVersion: backend.getTrip().version,
       });
     }
@@ -189,6 +223,12 @@ export async function mockTripApi(
       };
     }
     backend.setTrip(trip);
+    if (
+      mutation.type === "add-suggested-place" &&
+      backend.consumeDroppedSuggestionResponse()
+    ) {
+      return route.abort();
+    }
     return json(route, { trip });
   });
 

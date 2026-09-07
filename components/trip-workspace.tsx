@@ -55,6 +55,19 @@ function dateLabel(value: string) {
     timeZone: "UTC",
   }).format(new Date(`${value}T12:00:00Z`));
 }
+
+function normalizedPlaceValue(value: string | null | undefined) {
+  return (value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function matchesSuggestedPlace(place: SavedPlace, suggestion: SuggestedPlace) {
+  return (
+    normalizedPlaceValue(place.name) ===
+      normalizedPlaceValue(suggestion.name) &&
+    normalizedPlaceValue(place.locality) ===
+      normalizedPlaceValue(suggestion.locality)
+  );
+}
 function emptyConditions(target: string): ConditionsEnvelope {
   return {
     status: "unavailable",
@@ -475,10 +488,33 @@ export function TripWorkspace() {
   }
 
   function addSuggestedPlace(suggestion: SuggestedPlace) {
-    return performMutation(
-      { type: "add-suggested-place", suggestion },
-      suggestion,
-    );
+    return (async () => {
+      const outcome = await performMutation(
+        { type: "add-suggested-place", suggestion },
+        suggestion,
+      );
+      if (outcome.status !== "error" || !token) return outcome;
+
+      // A timed-out or interrupted response can arrive after the repository
+      // committed the mutation. Reconcile once before showing a false error.
+      try {
+        const refreshed = await tripState.mutate();
+        const refreshedTrip = refreshed?.trip;
+        if (
+          refreshedTrip?.places.some((place) =>
+            matchesSuggestedPlace(place, suggestion),
+          )
+        ) {
+          setCachedTrip(refreshedTrip);
+          await saveTripSnapshot(token, refreshedTrip);
+          setMutationError("");
+          return { status: "saved" as const };
+        }
+      } catch {
+        // Preserve the original mutation error when reconciliation is also unavailable.
+      }
+      return outcome;
+    })();
   }
 
   async function shareTrip() {

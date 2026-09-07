@@ -1,4 +1,8 @@
 import { buildTripChatContext } from "@/lib/chat/context";
+import {
+  hasExplicitSavedPlaceIntent,
+  normalizedPlaceKey,
+} from "@/lib/chat/intent";
 import type { TripChatModel, TripChatUsage } from "@/lib/chat/model";
 import { TripChatInvalidOutputError } from "@/lib/chat/model";
 import {
@@ -290,7 +294,11 @@ export function createTripChatHandler({
         throw new TripChatInvalidOutputError("Invalid model output");
       const boundedIds = new Set(context.places.map((place) => place.id));
       const authoritativeIds = new Set(trip.places.map((place) => place.id));
-      const savedPlaceIds = output.data.savedPlaceIds.filter(
+      const savedPlaceIds = (
+        hasExplicitSavedPlaceIntent(parsed.data.message)
+          ? output.data.savedPlaceIds
+          : []
+      ).filter(
         (id, index, ids) =>
           ids.indexOf(id) === index &&
           boundedIds.has(id) &&
@@ -324,6 +332,11 @@ export function createTripChatHandler({
       const finalSavedPlaceIds = savedPlaceIds.filter((id) =>
         responsePlaceIds.has(id),
       );
+      const existingPlaceKeys = new Set(
+        trip.places.map((place) =>
+          normalizedPlaceKey(place.name, place.locality),
+        ),
+      );
       const response = tripChatResponseSchema.safeParse({
         message: output.data.message,
         savedPlaceIds: finalSavedPlaceIds,
@@ -335,7 +348,10 @@ export function createTripChatHandler({
                   suggestion,
                 ): suggestion is typeof suggestion & { sourceUrl: string } =>
                   suggestion.sourceUrl !== null &&
-                  searchedUrls.has(suggestion.sourceUrl),
+                  searchedUrls.has(suggestion.sourceUrl) &&
+                  !existingPlaceKeys.has(
+                    normalizedPlaceKey(suggestion.name, suggestion.locality),
+                  ),
               ),
         tripVersion: responseTrip.version,
       });
