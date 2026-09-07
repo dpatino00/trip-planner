@@ -80,6 +80,63 @@ test("adds a reviewed Ask suggestion to Ideas for collaborators without scheduli
   }
 });
 
+// @spec CHAT-BE-022, CHAT-BE-025, CHAT-UI-007, CHAT-UI-012, CHAT-UI-013
+test("adds a deterministic free-form suggestion batch with one trip change", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend();
+  const original = structuredClone(backend.getTrip());
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  await page.getByRole("link", { name: "Ask" }).click();
+  await page.getByLabel("Ask about this trip").fill(
+    `Please add these places:
+La Puerta — Gaslamp
+Ironside Fish & Oyster — Little Italy
+Garage Kitchen + Bar — Gaslamp`,
+  );
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByRole("article", { name: "La Puerta" })).toBeVisible();
+  await expect(
+    page.getByRole("article", { name: "Ironside Fish & Oyster" }),
+  ).toBeVisible();
+  const garage = page.getByRole("article", {
+    name: "Garage Kitchen + Bar",
+  });
+  await expect(garage).toBeVisible();
+  await expect(garage.getByRole("link", { name: "Learn more" })).toHaveCount(0);
+  await expect(garage.getByRole("link", { name: "Google Maps" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Add all new" }).click();
+  await expect(page.getByText("Saved to Ideas")).toHaveCount(3);
+  expect(backend.getTrip().version).toBe(original.version + 1);
+  expect(backend.getTrip().places).toHaveLength(original.places.length + 3);
+  expect(backend.getTrip().itinerary).toEqual(original.itinerary);
+});
+
+// @spec CHAT-BE-028, CHAT-UI-013
+test("reconciles every committed batch card when the mutation response is interrupted", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend(makeTripV2(), {
+    dropFirstSuggestionResponse: true,
+  });
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  await page.getByRole("link", { name: "Ask" }).click();
+  await page
+    .getByLabel("Ask about this trip")
+    .fill(
+      "Please add La Puerta, Ironside Fish & Oyster, and Garage Kitchen + Bar.",
+    );
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Add all new" }).click();
+
+  await expect(page.getByText("Saved to Ideas")).toHaveCount(3);
+  await expect(page.getByText("Could not save this suggestion")).toHaveCount(0);
+});
+
 // @spec CHAT-BE-004, CHAT-UI-004, CHAT-UI-005
 test("reconciles a committed suggestion when the first response is interrupted", async ({
   page,
