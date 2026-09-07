@@ -1,0 +1,160 @@
+import { z } from "zod";
+
+const interestSchema = z.enum([
+  "coast",
+  "outdoors",
+  "food",
+  "culture",
+  "history",
+  "wildlife",
+  "nightlife",
+  "shopping",
+  "relaxing",
+]);
+const daypartSchema = z.enum([
+  "morning",
+  "midday",
+  "afternoon",
+  "golden-hour",
+  "evening",
+]);
+
+const savedPlaceIdsSchema = z.array(z.string().trim().min(1).max(120)).max(3);
+const savedPlaceSourceCandidateSchema = z
+  .object({
+    savedPlaceId: z.string().trim().min(1).max(120),
+    sourceUrl: z.string().url().startsWith("https://"),
+  })
+  .strict();
+const savedPlaceSourcesSchema = z
+  .array(savedPlaceSourceCandidateSchema)
+  .max(3)
+  .refine(
+    (values) =>
+      new Set(values.map((value) => value.savedPlaceId)).size === values.length,
+  );
+
+function hasOneOrTwoSentences(value: string) {
+  const endings = value.match(/[.!?](?:\s|$)/g)?.length ?? 0;
+  return endings >= 1 && endings <= 2;
+}
+
+// @spec CHAT-DATA-001, CHAT-DATA-002
+export const suggestedPlaceSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    summary: z.string().trim().min(20).max(500).refine(hasOneOrTwoSentences),
+    locality: z.string().trim().min(1).max(120).nullable(),
+    interests: z
+      .array(interestSchema)
+      .refine((values) => new Set(values).size === values.length),
+    tags: z
+      .array(z.string().regex(/^[a-z0-9][a-z0-9 -]{0,29}$/))
+      .max(10)
+      .refine((values) => new Set(values).size === values.length),
+    profile: z.enum(["indoor", "outdoor", "coastal", "mixed"]),
+    preferredDayparts: z
+      .array(daypartSchema)
+      .refine((values) => new Set(values).size === values.length),
+    durationMinutes: z.number().int().min(15).max(1440).nullable(),
+    costLevel: z
+      .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
+      .nullable(),
+    reservationRecommended: z.boolean().nullable(),
+    sourceUrl: z.string().url().startsWith("https://").nullable(),
+  })
+  .strict();
+
+const sourcedSuggestedPlaceSchema = suggestedPlaceSchema.extend({
+  sourceUrl: z.string().url().startsWith("https://"),
+});
+
+// @spec CHAT-DATA-002, CHAT-API-011
+export const tripChatResponseSchema = z
+  .object({
+    message: z.string().trim().min(1).max(2000),
+    savedPlaceIds: savedPlaceIdsSchema.refine(
+      (values) => new Set(values).size === values.length,
+    ),
+    suggestions: z.array(sourcedSuggestedPlaceSchema).max(3),
+    tripVersion: z.number().int().positive(),
+  })
+  .strict();
+
+// Model candidates permit duplicate IDs so the authoritative handler can
+// silently normalize them before validating the public response contract.
+// @spec CHAT-DATA-006
+export const tripChatCandidateResponseSchema = z
+  .object({
+    message: z.string().trim().min(1).max(2000),
+    savedPlaceIds: savedPlaceIdsSchema,
+    savedPlaceSources: savedPlaceSourcesSchema,
+    suggestions: z.array(suggestedPlaceSchema).max(3),
+  })
+  .strict();
+
+// The Responses API's strict JSON Schema accepts the basic required types, but
+// not all of the local-only Zod refinements used by tripChatResponseSchema.
+// Keep those checks for post-response validation in the handler.
+const suggestedPlaceModelSchema = z
+  .object({
+    name: z.string(),
+    summary: z.string(),
+    locality: z.string().nullable(),
+    interests: z.array(interestSchema),
+    tags: z.array(z.string()),
+    profile: z.enum(["indoor", "outdoor", "coastal", "mixed"]),
+    preferredDayparts: z.array(daypartSchema),
+    durationMinutes: z.number().nullable(),
+    costLevel: z.number().nullable(),
+    reservationRecommended: z.boolean().nullable(),
+    sourceUrl: z.string().nullable(),
+  })
+  .strict();
+const savedPlaceSourceModelSchema = z
+  .object({
+    savedPlaceId: z.string(),
+    sourceUrl: z.string(),
+  })
+  .strict();
+
+// @spec CHAT-DATA-006
+export const tripChatModelResponseSchema = z
+  .object({
+    message: z.string(),
+    savedPlaceIds: z.array(z.string()).max(3),
+    savedPlaceSources: z.array(savedPlaceSourceModelSchema).max(3),
+    suggestions: z.array(suggestedPlaceModelSchema).max(3),
+  })
+  .strict();
+
+const historyItemSchema = z
+  .object({
+    role: z.enum(["user", "assistant"]),
+    content: z.string().trim().min(1).max(2000),
+  })
+  .strict();
+
+// @spec CHAT-API-001, CHAT-API-004
+export const tripChatRequestSchema = z
+  .object({
+    message: z.string().trim().min(1).max(2000),
+    history: z.array(historyItemSchema).max(8),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const characters = value.history.reduce(
+      (total, item) => total + item.content.length,
+      0,
+    );
+    if (characters > 8000) {
+      context.addIssue({
+        code: "custom",
+        path: ["history"],
+        message: "History exceeds 8,000 characters",
+      });
+    }
+  });
+
+export type TripChatRequest = z.infer<typeof tripChatRequestSchema>;
+export type TripChatResponse = z.infer<typeof tripChatResponseSchema>;

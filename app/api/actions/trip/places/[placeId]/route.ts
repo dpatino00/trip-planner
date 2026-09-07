@@ -1,7 +1,4 @@
-import {
-  actionConfigError,
-  getActionHandlers,
-} from "@/lib/actions/runtime";
+import { actionConfigError, getActionHandlers } from "@/lib/actions/runtime";
 
 export const runtime = "nodejs";
 export async function PATCH(

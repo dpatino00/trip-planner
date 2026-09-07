@@ -1,6 +1,34 @@
 import type { Page, Route } from "@playwright/test";
 
+import type { SavedPlace } from "../../lib/types";
 import { makeConditionsV2, makeTripV2, SHARE_TOKEN } from "../web/fixtures";
+
+type MockTrip = ReturnType<typeof makeTripV2>;
+
+export interface MockTripBackend {
+  getTrip: () => MockTrip;
+  setTrip: (trip: MockTrip) => void;
+  consumeDroppedSuggestionResponse: () => boolean;
+}
+
+export function createMockTripBackend(
+  initial: MockTrip = makeTripV2(),
+  options: { dropFirstSuggestionResponse?: boolean } = {},
+): MockTripBackend {
+  let trip = initial;
+  let dropSuggestionResponse = options.dropFirstSuggestionResponse ?? false;
+  return {
+    getTrip: () => trip,
+    setTrip: (next) => {
+      trip = next;
+    },
+    consumeDroppedSuggestionResponse: () => {
+      const shouldDrop = dropSuggestionResponse;
+      dropSuggestionResponse = false;
+      return shouldDrop;
+    },
+  };
+}
 
 function json(
   route: Route,
@@ -16,13 +44,92 @@ function json(
   });
 }
 
-export async function mockTripApi(page: Page) {
-  let trip = makeTripV2();
-
+export async function mockTripApi(
+  page: Page,
+  backend: MockTripBackend = createMockTripBackend(),
+) {
   await page.route("**/api/conditions**", (route) =>
     json(route, makeConditionsV2()),
   );
+  await page.route("**/api/trip/chat", (route) => {
+    const request = route.request().postDataJSON() as { message?: string };
+    if (/torrey pines/i.test(request.message ?? "")) {
+      const current = backend.getTrip();
+      const sourceUrl = "https://www.parks.ca.gov/torreypines";
+      const trip = {
+        ...current,
+        version: current.version + 1,
+        places: current.places.map((place: SavedPlace) =>
+          place.id === "place-torrey-pines" && !place.sourceUrl
+            ? { ...place, sourceUrl }
+            : place,
+        ),
+      };
+      backend.setTrip(trip);
+      return json(route, {
+        message: "Torrey Pines is already in your Ideas.",
+        savedPlaceIds: ["place-torrey-pines"],
+        suggestions: [],
+        tripVersion: trip.version,
+      });
+    }
+    if (
+      /mexican/i.test(request.message ?? "") &&
+      /saved|ideas|add|include/i.test(request.message ?? "")
+    ) {
+      return json(route, {
+        message: "You already saved a Mexican seafood favorite.",
+        savedPlaceIds: ["place-tacos"],
+        suggestions: [],
+        tripVersion: backend.getTrip().version,
+      });
+    }
+    if (/mexican/i.test(request.message ?? "")) {
+      return json(route, {
+        message: "Here are some new Mexican options to consider.",
+        savedPlaceIds: [],
+        suggestions: [
+          {
+            name: "La Puerta",
+            summary:
+              "A lively Gaslamp Mexican restaurant for tacos and drinks.",
+            locality: "Gaslamp",
+            interests: ["food"],
+            tags: ["mexican", "tacos", "casual"],
+            profile: "indoor",
+            preferredDayparts: ["evening"],
+            durationMinutes: 90,
+            costLevel: 2,
+            reservationRecommended: false,
+            sourceUrl: "https://gaslamp.org/listing/la-puerta/",
+          },
+        ],
+        tripVersion: backend.getTrip().version,
+      });
+    }
+    return json(route, {
+      message: "La Jolla Cove could fit a relaxed coastal morning.",
+      savedPlaceIds: [],
+      suggestions: [
+        {
+          name: "La Jolla Cove",
+          summary: "A compact coastal stop for views and wildlife.",
+          locality: "La Jolla",
+          interests: ["coast", "wildlife"],
+          tags: ["coast", "sea lions"],
+          profile: "coastal",
+          preferredDayparts: ["morning"],
+          durationMinutes: 90,
+          costLevel: 0,
+          reservationRecommended: false,
+          sourceUrl: "https://www.sandiego.gov/lifeguards/beaches/cove",
+        },
+      ],
+      tripVersion: backend.getTrip().version,
+    });
+  });
   await page.route("**/api/trip", async (route) => {
+    let trip = backend.getTrip();
     const method = route.request().method();
     if (method === "POST")
       return json(route, { token: SHARE_TOKEN, trip }, 201);
@@ -87,14 +194,43 @@ export async function mockTripApi(page: Page) {
             : proposal,
         ),
       };
+    } else if (mutation.type === "add-suggested-place") {
+      const duplicate = trip.places.some(
+        (place: SavedPlace) =>
+          place.name.trim().toLocaleLowerCase() ===
+            mutation.suggestion.name.trim().toLocaleLowerCase() &&
+          (place.locality ?? "").trim().toLocaleLowerCase() ===
+            (mutation.suggestion.locality ?? "").trim().toLocaleLowerCase(),
+      );
+      if (duplicate) return json(route, { trip, duplicate: true });
+      const timestamp = "2026-09-06T12:00:00.000Z";
+      trip = {
+        ...trip,
+        version: trip.version + 1,
+        places: [
+          ...trip.places,
+          {
+            ...mutation.suggestion,
+            id: "place-la-jolla-cove",
+            coordinates: null,
+            waterContact: false,
+            accessibility: [],
+            origin: "chatgpt",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ],
+      };
+    }
+    backend.setTrip(trip);
+    if (
+      mutation.type === "add-suggested-place" &&
+      backend.consumeDroppedSuggestionResponse()
+    ) {
+      return route.abort();
     }
     return json(route, { trip });
   });
 
-  return {
-    getTrip: () => trip,
-    setTrip: (next: ReturnType<typeof makeTripV2>) => {
-      trip = next;
-    },
-  };
+  return backend;
 }

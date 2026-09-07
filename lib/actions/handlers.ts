@@ -3,11 +3,11 @@ import { z } from "zod";
 
 import type {
   PlanProposal,
-  SavedPlace,
   TripDocument,
   TripMutation,
   TripPreferences,
 } from "@/lib/types";
+import { createSuggestedPlace } from "@/lib/places/suggested";
 import { applyTripMutation } from "@/lib/trips/model";
 import { migrateTripDocument } from "@/lib/trips/migrate";
 import { buildPlanProposal } from "@/lib/trips/optimizer";
@@ -117,9 +117,6 @@ async function readBody(request: Request) {
     return null;
   }
 }
-function normalize(value: string | null | undefined) {
-  return (value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
-}
 function currentProposal(trip: TripDocument) {
   return (
     trip.proposals.find((proposal) => proposal.status === "pending") ?? null
@@ -144,6 +141,7 @@ interface Dependencies {
   repository: TripRepository;
   rateLimiter: RateLimiter;
   actionKey: string;
+  actionTripToken: string;
   clock?: () => Date;
 }
 
@@ -152,10 +150,14 @@ export function createActionHandlers({
   repository,
   rateLimiter,
   actionKey,
+  actionTripToken,
   clock = () => new Date(),
 }: Dependencies) {
   if (Buffer.byteLength(actionKey) < 32) {
     throw new Error("Action key must contain at least 32 bytes");
+  }
+  if (!isValidShareToken(actionTripToken)) {
+    throw new Error("Action trip token is invalid");
   }
 
   async function authenticate(
@@ -170,17 +172,7 @@ export function createActionHandlers({
         failure: error("action-auth-invalid", "Invalid Action key", 401),
       };
     }
-    const token = request.headers.get("x-trip-token");
-    if (!token || !isValidShareToken(token)) {
-      return {
-        failure: error(
-          "trip-auth-invalid",
-          "A valid trip token is required",
-          401,
-        ),
-      };
-    }
-    const rateKey = hashPrivateKey(`${actionKey}:${token}`);
+    const rateKey = hashPrivateKey(`${actionKey}:${actionTripToken}`);
     try {
       const allowed = await rateLimiter.check(
         `action-${mutation ? "write" : "read"}:${rateKey}`,
@@ -202,7 +194,7 @@ export function createActionHandlers({
         ),
       };
     }
-    return { key: tripKeyForToken(token) };
+    return { key: tripKeyForToken(actionTripToken) };
   }
 
   async function load(
@@ -382,14 +374,14 @@ export function createActionHandlers({
       }
       const loaded = await load(request, true);
       if ("failure" in loaded) return loaded.failure;
+      const created = createSuggestedPlace(
+        parsed.data.place,
+        loaded.trip.places,
+        { clock, idFactory: () => crypto.randomUUID() },
+      );
       if (loaded.stored.recentMutationIds.includes(parsed.data.mutationId)) {
-        const repeated = loaded.trip.places.find(
-          (place) =>
-            normalize(place.name) === normalize(parsed.data.place.name) &&
-            normalize(place.locality) === normalize(parsed.data.place.locality),
-        );
         return actionResult("Place already saved", loaded.trip, {
-          place: repeated,
+          place: created.place,
         });
       }
       if (loaded.trip.version !== parsed.data.version) {
@@ -405,73 +397,14 @@ export function createActionHandlers({
           409,
         );
       }
-      const existing = loaded.trip.places.find(
-        (place) =>
-          normalize(place.name) === normalize(parsed.data.place.name) &&
-          normalize(place.locality) === normalize(parsed.data.place.locality),
-      );
-      if (existing) {
+      if (created.duplicate) {
         return actionResult(
           "Place already saved",
           loaded.trip,
-          { place: existing },
-          ["Duplicate place matched by name and locality."],
+          { place: created.duplicate },
+          created.warnings,
         );
       }
-      const warnings: string[] = [];
-      const rawCoordinates = parsed.data.place.coordinates;
-      const parsedCoordinates = coordinates.safeParse(rawCoordinates);
-      const safeCoordinates =
-        rawCoordinates === undefined || rawCoordinates === null
-          ? null
-          : parsedCoordinates.success
-            ? parsedCoordinates.data
-            : null;
-      if (
-        rawCoordinates !== undefined &&
-        rawCoordinates !== null &&
-        !parsedCoordinates.success
-      ) {
-        warnings.push("Discarded invalid coordinates.");
-      }
-      const rawUrl = parsed.data.place.sourceUrl;
-      const safeUrl =
-        typeof rawUrl === "string" &&
-        z.string().url().startsWith("https://").safeParse(rawUrl).success
-          ? rawUrl
-          : null;
-      if (rawUrl !== undefined && rawUrl !== null && safeUrl === null) {
-        warnings.push("Discarded invalid sourceUrl.");
-      }
-      const now = clock().toISOString();
-      const tags = [
-        ...new Set(
-          (parsed.data.place.tags ?? [])
-            .map((tag) => tag.trim().toLocaleLowerCase())
-            .filter((tag) => /^[a-z0-9][a-z0-9 -]{0,29}$/.test(tag)),
-        ),
-      ].slice(0, 10);
-      const place: SavedPlace = {
-        id: `place-${crypto.randomUUID()}`,
-        name: parsed.data.place.name.trim(),
-        summary: parsed.data.place.summary ?? "",
-        locality: parsed.data.place.locality ?? null,
-        coordinates: safeCoordinates,
-        interests: parsed.data.place.interests ?? [],
-        tags,
-        profile: parsed.data.place.profile ?? "mixed",
-        waterContact: parsed.data.place.waterContact ?? false,
-        preferredDayparts: parsed.data.place.preferredDayparts ?? [],
-        durationMinutes: parsed.data.place.durationMinutes ?? null,
-        costLevel: parsed.data.place.costLevel ?? null,
-        accessibility: parsed.data.place.accessibility ?? [],
-        reservationRecommended:
-          parsed.data.place.reservationRecommended ?? null,
-        sourceUrl: safeUrl,
-        origin: "chatgpt",
-        createdAt: now,
-        updatedAt: now,
-      };
       const regenerated = new Request(request.url, {
         method: request.method,
         headers: request.headers,
@@ -480,12 +413,14 @@ export function createActionHandlers({
       return mutate(
         regenerated,
         schema,
-        () => ({ type: "add-place", place }),
+        () => ({ type: "add-place", place: created.place }),
         (trip) => ({
-          place: trip.places.find((candidate) => candidate.id === place.id)!,
+          place: trip.places.find(
+            (candidate) => candidate.id === created.place.id,
+          )!,
         }),
         "Place saved",
-        { optimize: true, warnings },
+        { optimize: true, warnings: created.warnings },
       );
     },
 

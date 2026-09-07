@@ -74,6 +74,20 @@ export interface SavedPlace {
   unavailable?: boolean;
 }
 
+export interface SuggestedPlace {
+  name: string;
+  summary: string;
+  locality: string | null;
+  interests: Interest[];
+  tags: string[];
+  profile: PlaceProfile;
+  preferredDayparts: Daypart[];
+  durationMinutes: number | null;
+  costLevel: CostLevel | null;
+  reservationRecommended: boolean | null;
+  sourceUrl: string | null;
+}
+
 export interface TripPreferences {
   interests: Interest[];
   maximumCost: CostLevel;
@@ -227,10 +241,13 @@ export type TripMutation =
   | { type: "apply-plan-proposal"; proposalId: string }
   | { type: "dismiss-plan-proposal"; proposalId: string };
 
+export type TripApiMutation =
+  TripMutation | { type: "add-suggested-place"; suggestion: SuggestedPlace };
+
 export interface TripMutationRequest {
   baseVersion: number;
   mutationId: string;
-  mutation: TripMutation;
+  mutation: TripApiMutation;
 }
 
 export type DataFreshness = "live" | "stale" | "unavailable";

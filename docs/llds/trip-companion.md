@@ -1,16 +1,16 @@
 # Conversational Trip Companion — Low-Level Design
 
 **Created**: 2026-09-01
-**Last updated**: 2026-09-02
+**Last updated**: 2026-09-06
 **Related HLD**: [Conversational Trip Companion — High-Level Design](../high-level-design.md)
 
 ## Context and Design Philosophy
 
 The trip companion is a destination-neutral shared plan. The website owns the
-durable trip state and visual experience. A private Custom GPT is an additional
-client that translates conversation into authenticated, structured mutations.
-It does not store the canonical plan, edit application code, or run a separate
-autonomous workflow.
+durable trip state and visual experience. Embedded Ask is an authenticated,
+read-only AI client that returns narrative advice and reviewable place
+suggestions. Only a separate explicit browser mutation can add a suggestion. A
+private Custom GPT remains an optional additional client for structured Actions.
 
 The implementation follows these principles:
 
@@ -39,16 +39,17 @@ and offline status.
 ```text
 Custom GPT
 └── OpenAPI Action client
-    ├── static Action API key in Authorization header
-    └── current trip token in X-Trip-Token header
+    └── static Action API key in Authorization header
 
 Next.js application
 ├── landing and trip creation
 ├── /trip workspace
 │   ├── Today
 │   ├── Ideas
-│   └── Plan
+│   ├── Plan
+│   └── Ask (session-local conversation)
 ├── /api/trip browser route
+├── /api/trip/chat embedded AI route
 ├── /api/actions/trip Action routes
 └── /api/conditions destination-neutral condition route
 
@@ -144,9 +145,10 @@ Tags are lower-case strings of 1–30 characters, with at most ten unique tags.
 Duration, when known, is 15–1,440 minutes.
 
 Only `https:` source URLs are retained. A missing or rejected source URL does not
-reject an otherwise valid place; the response carries a warning and the UI uses a
-generated Google Maps or Apple Maps search URL based on `name + locality`. The
-application does not fetch or scrape a supplied URL in the initial release.
+reject an otherwise valid place; the response carries a warning and the UI uses
+generated Apple Maps and Google Maps search URLs plus a Google Maps directions
+URL based on `name + locality` (or available coordinates). The application does
+not fetch, scrape, or web-search for a supplied URL in the initial release.
 
 The `origin` field describes how a place entered the trip, not whether its details
 are authoritative. There is no required image field. Existing local artwork may
@@ -345,31 +347,170 @@ interface ApiError {
 Browser mutations include place add/update, preference changes, favorite changes,
 itinerary changes, and proposal application or dismissal. They retain the
 existing `{ baseVersion, mutationId, mutation }` envelope and atomic version
-checks.
+checks. The transport-only `add-suggested-place` mutation carries a validated
+`SuggestedPlace`; the server normalizes it into the existing internal
+`add-place` mutation. A normalized name/locality duplicate is a successful no-op.
+
+## Embedded Ask Contract
+
+`POST /api/trip/chat` authenticates `Authorization: Bearer <trip-token>` and
+accepts a trimmed 1–2,000 character `message` plus at most eight prior user or
+assistant text messages. Each history item is 1–2,000 characters and combined
+history is capped at 8,000 characters. Bodies above 16 KiB are rejected.
+
+The client never submits a trip document. After authentication, the route loads
+the authoritative trip and constructs a compact context containing title,
+destination, dates, preferences, capped saved-place IDs and summaries, itinerary
+items, and a pending-proposal summary. Each included place carries only its ID,
+name, summary, locality, interests, normalized tags, profile, and source URL.
+Tokens, internal keys, expiry metadata, and unrelated timestamps are excluded,
+and serialized context is capped. For trips above the cap, saved-place matching
+is limited to the places that remain in this bounded context.
+
+```ts
+interface SuggestedPlace {
+  name: string;
+  summary: string;
+  locality: string | null;
+  interests: Interest[];
+  tags: string[];
+  profile: "indoor" | "outdoor" | "coastal" | "mixed";
+  preferredDayparts: Daypart[];
+  durationMinutes: number | null;
+  costLevel: 0 | 1 | 2 | 3 | null;
+  reservationRecommended: boolean | null;
+  sourceUrl: string | null;
+}
+
+interface TripChatResponse {
+  message: string;
+  savedPlaceIds: string[];
+  suggestions: Array<SuggestedPlace & { sourceUrl: string }>;
+  tripVersion: number;
+}
+
+interface SavedPlaceSourceCandidate {
+  savedPlaceId: string;
+  sourceUrl: string;
+}
+
+interface TripChatModelResponse {
+  message: string;
+  savedPlaceIds: string[];
+  savedPlaceSources: SavedPlaceSourceCandidate[];
+  suggestions: SuggestedPlace[];
+}
+```
+
+All strict Structured Output properties are required; nullable properties
+represent optional concepts. The response message is at most 2,000 characters
+and both saved-place IDs and suggestions are capped at three. Saved-place IDs
+must be unique and ordered from most to least relevant. The route silently
+discards IDs that are duplicated, absent from the bounded context, or absent
+from the authoritative trip while preserving the model's ranking order. The
+model candidate may also return at most three unique
+`SavedPlaceSourceCandidate` values. The route accepts one only when its place ID
+is a valid returned saved match, the authoritative saved place currently has no
+source URL, and its URL exactly matches an HTTPS URL in the current response's
+bounded web-search evidence. Candidates for unknown, unreturned, or already
+sourced places are silently discarded.
+
+If at least one valid saved-place ID remains, the route returns those IDs and an
+empty suggestions array even when the model supplied suggestions. Otherwise it
+returns only new-place candidates whose non-null `sourceUrl` exactly matches an
+HTTPS URL in the current response's bounded web-search evidence. New-place and
+saved-place URLs from trip context, user input, conversation history, or model
+narrative do not count as search evidence. If no candidate has a verified
+source, the route returns no suggestion card or source enrichment rather than
+accepting an unsourced URL. Shared `SuggestedPlace` and `SavedPlace` schemas keep
+nullable `sourceUrl` for existing data and Action compatibility, while the
+embedded Ask response narrows every returned new suggestion to a non-null source
+URL. `tripVersion` is the authoritative version after any successful source
+enrichment and lets the client refresh stale trip state.
+
+The current browser sends `x-trip-chat-contract: 2`. The route includes
+`tripVersion` only for that contract; requests without the header receive the
+same validated response with the two original fields (`message` and
+`suggestions`). This rolling-compatibility rule prevents a strict older browser
+schema from rejecting additive fields while cached tabs age out. It does not
+change model generation, validation, authentication, or cache policy.
+
+For general discovery, the model suggests new places, excludes exact saved-place
+duplicates, and returns no saved IDs. It returns saved-place IDs only when the
+traveler explicitly asks about saved places, Ideas, the current trip, or adding
+named places. For an explicit saved-place request, it ranks useful matches by
+names, summaries, interests, and normalized tags. When every useful saved match
+already has a source URL, it returns only ranked `savedPlaceIds` and does not
+invoke web search. When a useful match lacks a source URL, it must use the one
+bulk web search to find references for all missing matched-place links together
+and returns the exact ID-to-URL associations as structured source candidates.
+For discovery, it must use that same single bulk search before returning up to
+three new suggestions. Each candidate identifies its own exact URL from that
+search in a structured field; placing a URL only in `message` is insufficient.
+The model does not claim that a source was persisted because persistence occurs
+after generation. Every returned new suggestion has a concise one- or two-
+sentence summary describing what the place is, why someone might visit, and the
+relevant character, cuisine, or experience; its tags use normalized lower-case
+search terms such as `mexican`, `seafood`, `casual`, or `outdoor`.
+
+After validation, the chat handler applies all accepted saved-place source URLs
+in one repository compare-and-set operation. It starts from the latest complete
+trip document, changes only `sourceUrl` and the place/document update timestamps,
+and increments the trip version once regardless of how many links are added. It
+preserves recent mutation IDs and does not run itinerary optimization because
+reference metadata does not affect ranking or scheduling. On a version conflict,
+the handler reloads once and retries only candidates whose places still exist and
+still have no source URL. It never overwrites a URL added concurrently. If the
+retry also conflicts, Ask still returns its validated narrative and saved matches
+with the latest known `tripVersion`, but reports no source as persisted.
+
+The injected `TripChatModel` production adapter uses the OpenAI Node SDK,
+`responses.parse()` with `zodTextFormat`, `store: false`, the configured
+`OPENAI_MODEL`, a 1,600-token output cap, and a 20-second timeout. It configures
+only low-context web search and allows at most one tool call for all suggestions
+in a response; no arbitrary HTTP or mutation tools are available. The model
+candidate schema remains tolerant of nullable source fields so the route can
+discard individual unsourced or ungrounded candidates without exposing partial
+invalid data. The public Ask response schema requires a source URL on every new
+suggestion. Invalid, incomplete, or refused model output returns `502`; timeout
+returns `504`; missing server configuration or an unavailable model/storage
+service returns `503`.
+
+The suggestion card renders each verified URL as `Learn more` before mutation.
+When the traveler explicitly chooses Add to trip, the existing versioned
+`add-suggested-place` mutation passes that URL through the shared place factory
+unchanged. Ideas then renders the same URL as `Visit source`; generation alone
+never adds a saved place. For saved matches, the chat handler's validated
+missing-link enrichment is the only generation-time trip mutation; generation
+never overwrites a source, schedules a place, or changes other saved fields.
+
+Chat is limited to ten requests per hashed trip/address pair per ten minutes and
+one hundred requests per hashed trip per UTC day. The daily allowance is the MVP
+budget control; a weighted token ledger is deferred. Successful and error
+responses are `no-store`.
 
 ## Custom GPT Action Contracts
 
 Official OpenAI documentation requires a GPT Action to describe its API through
-an OpenAPI schema and supports API key or OAuth authentication. The initial
-private integration uses API key authentication and does not call the OpenAI API
-from the application.
+an OpenAPI schema and supports API key or OAuth authentication. This optional
+private integration continues to use API key authentication independently of
+the embedded OpenAI API integration.
 
 Every Action request requires:
 
 ```http
 Authorization: Bearer <TRIP_GPT_ACTION_KEY>
-X-Trip-Token: <token extracted from the user's private trip link fragment>
 ```
 
-The Action key proves the caller is the configured integration. The trip token
-selects and authorizes one trip. Neither credential is accepted in a path, query
-string, or JSON body. The GPT instructions tell it never to repeat the token in a
-response and to request the private trip link when the current conversation does
-not contain one.
+The Action key proves the caller is the configured integration. The server reads
+`TRIP_GPT_TRIP_TOKEN` from its environment to select and authorize the one trip
+bound to this private GPT. The trip token is not accepted from the GPT in a path,
+query string, header, JSON body, or instructions; it is never returned and is
+excluded from logs and caches.
 
 | `operationId`        | Method and endpoint                                   | Input                                                                                              | Success behavior                                                                                               |
 | -------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `getTripContext`     | `GET /api/actions/trip`                               | Required authentication headers                                                                    | Returns concise trip metadata, preferences, places, itinerary, latest pending proposal, and version            |
+| `getTripContext`     | `GET /api/actions/trip`                               | No operation arguments                                                                             | Returns concise trip metadata, preferences, places, itinerary, latest pending proposal, and version            |
 | `setTripDestination` | `POST /api/actions/trip/destination`                  | Version, mutation ID, destination name, and optional locality, country, coordinates, and time zone | Updates the destination context, refreshes applicable conditions on the next read, and returns the destination |
 | `addPlace`           | `POST /api/actions/trip/places`                       | Version, mutation ID, required name, optional structured place fields                              | Adds one place idempotently, runs optimization, and returns the place plus latest proposal                     |
 | `updatePlace`        | `PATCH /api/actions/trip/places/{placeId}`            | Version, mutation ID, allowlisted place changes                                                    | Updates one existing place, runs optimization, and returns the place plus latest proposal                      |
@@ -398,6 +539,12 @@ because ChatGPT uses them to decide which Action to call and how to populate its
 parameters. The `applyPlanProposal` description states that it may be called only
 after the user explicitly accepts the identified proposal.
 
+The checked-in schema uses directly declared path parameters and plain top-level
+object request bodies. It does not rely on dynamic header parameters, reusable
+parameter `$ref` entries, or `allOf` composition because the Custom GPT Action
+importer must be able to discover every operation and input without
+general-purpose OpenAPI reference resolution. The schema contains no trip token.
+
 ## Storage, Concurrency, and Rate Limits
 
 Trip keys remain `trip:v1:<sha256(trip-token)>`; changing the document schema does
@@ -417,7 +564,9 @@ Browser and Action mutations share this sequence:
    and preserve absolute expiry atomically.
 7. Return `409` with current version information if another writer won.
 
-The browser may retry one conflict after rebasing its semantic mutation. The GPT
+The browser retries a confirmed suggestion once after rebasing its semantic
+mutation against the authoritative trip returned by a conflict, preserving the
+same mutation ID. A second conflict preserves the suggestion card for retry. The GPT
 must call `getTripContext` and repeat its requested mutation with a new mutation
 ID after a conflict; the server never guesses at conversational intent.
 
@@ -426,15 +575,28 @@ mutations to 30 per hashed Action-key/trip-token pair per minute. Rate-limit key
 expire with their windows. The application never stores raw client IPs or raw
 credentials in rate-limit keys.
 
+### Ask about a trip
+
+The Ask tab keeps a version-2 maximum of twelve messages in `sessionStorage`
+under a SHA-256-derived trip key and sends only the most recent eight text
+messages. Each assistant message stores ranked saved-place IDs as well as new
+suggestions. Version-1 ephemeral chat data is discarded rather than migrated.
+The exact trip token is removed before persistence and is rejected if submitted
+to the server. Dismissing a suggestion is session-local and performs no
+mutation. Adding a suggestion uses conflict reconciliation, updates SWR and the
+IndexedDB snapshot, and adds only to Ideas—not the itinerary. Saved matches are
+read-only and never add, edit, remove, favorite, or schedule a place. Planning
+questions receive narrative guidance that points travelers to the existing Plan
+proposal workflow; embedded Ask never creates a `PlanProposal`.
+
 ## Primary Behaviors
 
 ### Connect a conversation to a trip
 
-The website exposes a “Copy link for ChatGPT” control that copies the existing
-private trip link and explains that anyone with that link can edit the trip. The
-user pastes it into their private GPT conversation. The GPT extracts the fragment
-for the `X-Trip-Token` header and calls `getTripContext` before the first mutation.
-No separate account connection is introduced.
+The deployment owner binds the private GPT to one trip by storing that trip's
+token as `TRIP_GPT_TRIP_TOKEN`. The GPT calls `getTripContext` before the first
+mutation and never asks the user for a private trip link. No separate account
+connection is introduced.
 
 ### Add or update a place from conversation
 
@@ -489,14 +651,37 @@ status or personal safety.
 ## User Interface Design
 
 The visual system remains warm, playful, accessible, and mobile-first. The
-primary navigation uses **Today**, **Ideas**, and **Plan**.
+primary navigation uses **Today**, **Ideas**, **Plan**, and **Ask**.
+
+Ask owns its composer, loading, error, messages, inline saved-match cards, and
+inline suggestion cards. Enter submits, Shift+Enter inserts a newline, and
+generation/add controls are disabled offline. Saved-match cards resolve IDs
+against the current authoritative trip in the browser and display the saved
+name, existing summary, useful tags, optional reference, Maps and directions
+links, and a lightweight **View in Ideas** action. After a successful Ask
+response, the client compares `tripVersion` with its loaded trip and revalidates
+when the server has a newer version, so an automatically added **Visit source**
+link is rendered from refreshed authoritative trip data rather than a model
+copy. Saved-match cards expose no manual mutation or scheduling controls and
+remain readable offline, with external links labeled as requiring connection.
+If a saved place is no longer present, its stale session ID renders no card.
+Suggestion cards provide generated Apple Maps, Google Maps, and Google Maps
+directions links before confirmation, plus a supplied source link when present.
+They retain explicit **Add to trip** and session-local **Dismiss** controls and
+expose saved, duplicate, or retry states.
+
+Assistant narrative uses a small allowlisted text formatter rather than raw
+HTML. It preserves paragraphs, recognizes simple numbered or bulleted lines,
+and turns only HTTPS Markdown links into safe outbound links. All other model
+text remains escaped text; raw HTML and non-HTTPS URL schemes are never
+interpreted.
 
 Place cards are content-first rather than photo-first. Each card shows:
 
 - name, locality, summary, and relevant tags;
 - recommendation reasons or scheduling state;
 - an optional “Visit source” link;
-- guaranteed Apple Maps and Google Maps search actions;
+- guaranteed Apple Maps, Google Maps search, and Google Maps directions actions;
 - an understated origin label such as “Added from ChatGPT”; and
 - no empty image frame when artwork is absent.
 
@@ -517,24 +702,44 @@ condition responses, and the offline fallback. It does not require or cache
 place images. Authenticated trip and Action responses are never placed in the
 service-worker Cache API.
 
+Service workers are production-only. In a non-production browser session, the
+registration helper unregisters any worker left on the local origin by a prior
+production build and reloads a currently controlled page once so development
+cannot run an obsolete client bundle against current route-handler contracts.
+It does not register `/sw.js` or populate application caches in development.
+
 The client stores only validated trip snapshots in IndexedDB under a hashed-token
 key. Offline mode can inspect saved places, source labels, itinerary items, and
 the last condition snapshot. External links are labeled as requiring connectivity;
-writes are not queued.
+writes and chat generation are not queued. Session-local chat remains readable.
 
 ## Security and Privacy
 
 - `TRIP_GPT_ACTION_KEY` is a server-only random secret of at least 32 bytes. The
   same value is entered in the Custom GPT Action authentication settings.
+- `TRIP_GPT_TRIP_TOKEN` is the server-only token for the single trip bound to the
+  private GPT. It is never entered in the GPT editor.
 - Action-key and trip-token comparisons use constant-time comparison after basic
   format validation. Missing or malformed credentials fail before storage reads.
 - Neither secret appears in paths, queries, response bodies, app logs, analytics,
   browser persistence, or service-worker cache keys.
+- `OPENAI_API_KEY` and `OPENAI_MODEL` are server-only. `OPENAI_MODEL` must
+  support Responses API Structured Outputs and web search. Model calls configure
+  only bounded web search and are not stored by the provider (`store: false`).
+- Chat logs contain only event name, request ID, configured model, hashed trip
+  identifier, duration, status, and returned token usage—never conversation
+  content, raw addresses, tokens, or secrets.
+- Chat bodies are limited to 16 KiB, reject the exact trip token in content, and
+  render all returned content as text.
 - Action and browser bodies are limited to 64 KiB and reject unknown fields.
 - GPT-supplied text renders only as text. Rich HTML is not accepted.
 - Optional source URLs are parsed, restricted to HTTPS, and opened only after a
   user gesture. The server does not fetch them, preventing server-side request
   forgery in this release.
+- Automatic saved-place source enrichment accepts only an exact URL from the
+  current bounded web-search evidence, applies it only to a returned
+  authoritative saved-place ID with a missing URL, and never follows or fetches
+  that URL server-side.
 - The Action API exposes an allowlist of semantic operations and no delete-trip
   capability. Applying plan changes requires a current proposal and explicit
   user approval in the conversation or UI.
@@ -543,23 +748,30 @@ writes are not queued.
 
 ## Error and Edge-Case Behavior
 
-| Condition                           | Behavior                                                                              |
-| ----------------------------------- | ------------------------------------------------------------------------------------- |
-| Missing or invalid Action key       | Return `401 action-auth-invalid`; do not inspect the trip token.                      |
-| Missing or invalid trip token       | Return `401 trip-auth-invalid`; never echo the token.                                 |
-| Unknown or expired trip             | Return `404 trip-not-found` without revealing storage identifiers.                    |
-| Missing place name                  | Return non-retryable `400 validation-failed`.                                         |
-| Invalid optional URL or coordinates | Save other valid place data and return a warning describing the discarded field.      |
-| Exact duplicate place               | Return the existing place as a successful no-op with a duplicate warning.             |
-| Unknown place or proposal ID        | Return non-retryable `404`.                                                           |
-| Stale mutation or proposal version  | Return retryable `409 version-conflict` with the current version, not credentials.    |
-| Repeated mutation ID                | Return the current successful result without another write.                           |
-| Redis unavailable                   | Return retryable `503`; preserve browser drafts and do not claim a save.              |
-| Open-Meteo partial failure          | Return `200 degraded` and identify unavailable condition groups.                      |
-| Destination coordinates missing     | Return `200 unavailable`; keep condition-independent recommendations.                 |
-| Proposal has no useful changes      | Store no pending proposal and return an explanatory message.                          |
-| Browser offline during mutation     | Roll back optimistic state, retain the draft, and disable further writes.             |
-| Legacy place cannot be migrated     | Render an unavailable placeholder; never crash or silently delete the itinerary item. |
+| Condition                                         | Behavior                                                                                  |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Missing or invalid Action key                     | Return `401 action-auth-invalid`; do not access trip storage.                             |
+| Missing or invalid configured token               | Return `503 action-unavailable`; never expose the token or configuration value.           |
+| Unknown or expired trip                           | Return `404 trip-not-found` without revealing storage identifiers.                        |
+| Missing place name                                | Return non-retryable `400 validation-failed`.                                             |
+| Invalid optional URL or coordinates               | Save other valid place data and return a warning describing the discarded field.          |
+| Exact duplicate place                             | Return the existing place as a successful no-op with a duplicate warning.                 |
+| Unknown place or proposal ID                      | Return non-retryable `404`.                                                               |
+| Stale mutation or proposal version                | Return retryable `409 version-conflict` with the current version, not credentials.        |
+| Repeated mutation ID                              | Return the current successful result without another write.                               |
+| Redis unavailable                                 | Return retryable `503`; preserve browser drafts and do not claim a save.                  |
+| Open-Meteo partial failure                        | Return `200 degraded` and identify unavailable condition groups.                          |
+| Destination coordinates missing                   | Return `200 unavailable`; keep condition-independent recommendations.                     |
+| Proposal has no useful changes                    | Store no pending proposal and return an explanatory message.                              |
+| Browser offline during mutation                   | Roll back optimistic state, retain the draft, and disable further writes.                 |
+| Missing chat configuration                        | Return retryable `503 configuration-unavailable` without configuration values.            |
+| Chat allowance exhausted                          | Return retryable `429 rate-limited`.                                                      |
+| Model timeout                                     | Return retryable `504 model-timeout` after 20 seconds.                                    |
+| Invalid, incomplete, or refused AI output         | Return retryable `502 model-invalid-response`; do not expose partial suggestions.         |
+| Saved-place source has no current search evidence | Discard it and leave the saved place unchanged.                                           |
+| Saved place already has a source URL              | Preserve the existing URL and discard the enrichment candidate.                           |
+| Source enrichment conflicts twice                 | Return Ask results using the latest known trip version without claiming a link was saved. |
+| Legacy place cannot be migrated                   | Render an unavailable placeholder; never crash or silently delete the itinerary item.     |
 
 ## Performance Design
 
@@ -571,8 +783,9 @@ writes are not queued.
   queue, vector database, or additional datastore is introduced.
 - SWR owns live remote state and React derives filters, rankings, Maps URLs, and
   summary values without mirrored effect state.
-- No image-loading pipeline, place-search SDK, embedded map, drag-and-drop
-  framework, or OpenAI SDK is added for this release.
+- No image-loading pipeline, place-search SDK, embedded map, or drag-and-drop
+  framework is added for this release. The OpenAI SDK remains server-only and is
+  isolated from client bundles.
 
 ## Tooling, Build, and Deployment
 
@@ -583,11 +796,14 @@ Required production environment variables are:
 
 - `UPSTASH_REDIS_REST_URL`
 - `UPSTASH_REDIS_REST_TOKEN`
-- `TRIP_GPT_ACTION_KEY`
+- `TRIP_GPT_TRIP_TOKEN`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
 
-No `OPENAI_API_KEY` is required because ChatGPT calls the application's Action
-API; the application does not call an OpenAI model. No browser-exposed environment
-variable contains credentials.
+`TRIP_GPT_ACTION_KEY` and `TRIP_GPT_TRIP_TOKEN` are optional and enable the
+secondary Custom GPT Action client. Upstash remains required in production.
+
+No browser-exposed environment variable contains credentials.
 
 Preview deployment remains the acceptance environment. Production deployment is
 a separate explicit action after the conversational flow is validated with the
@@ -595,16 +811,16 @@ Custom GPT Action test interface and representative prompts.
 
 ## Design Decisions
 
-| Decision                                                            | Rationale                                                                                                | Alternatives                                                 |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Embed custom places in each trip document                           | A trip becomes destination-neutral and self-contained; old links can migrate deterministically.          | Global hardcoded catalog IDs, separate place database.       |
-| Use the Action key plus existing trip token                         | The integration is private without granting one credential access to every trip or introducing accounts. | Action key alone, OAuth, token in URL parameters.            |
-| Share mutation and repository code across browser and Action routes | Validation, concurrency, and persistence behavior cannot drift between clients.                          | Separate GPT datastore or bespoke write path.                |
-| Keep Action operations explicit                                     | Clear operation names and schemas help ChatGPT choose correctly and constrain mutations.                 | One generic mutation endpoint.                               |
-| Discard invalid optional enrichment with warnings                   | A bad link should not block saving the place the user requested.                                         | Reject the whole place, accept unsafe URLs.                  |
-| Always derive Maps links                                            | Every custom place remains actionable without trusting a supplied website or requiring a place API.      | Require an official site, use a paid place-search provider.  |
-| Make optimization synchronous and proposal-based                    | It provides immediate help with no worker infrastructure and protects confirmed choices.                 | Background queue, periodic agent, silent itinerary rewrites. |
-| Omit required image data                                            | Arbitrary places render consistently without repetitive, licensed, or stale imagery.                     | Mandatory local or generated images.                         |
+| Decision                                                            | Rationale                                                                                               | Alternatives                                                 |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Embed custom places in each trip document                           | A trip becomes destination-neutral and self-contained; old links can migrate deterministically.         | Global hardcoded catalog IDs, separate place database.       |
+| Bind the private GPT to one server-configured trip token            | The model never receives the browser credential and the initial integration remains simple and private. | Dynamic trip token arguments, OAuth, token in URLs.          |
+| Share mutation and repository code across browser and Action routes | Validation, concurrency, and persistence behavior cannot drift between clients.                         | Separate GPT datastore or bespoke write path.                |
+| Keep Action operations explicit                                     | Clear operation names and schemas help ChatGPT choose correctly and constrain mutations.                | One generic mutation endpoint.                               |
+| Discard invalid optional enrichment with warnings                   | A bad link should not block saving the place the user requested.                                        | Reject the whole place, accept unsafe URLs.                  |
+| Always derive Maps links                                            | Every custom place remains actionable without trusting a supplied website or requiring a place API.     | Require an official site, use a paid place-search provider.  |
+| Make optimization synchronous and proposal-based                    | It provides immediate help with no worker infrastructure and protects confirmed choices.                | Background queue, periodic agent, silent itinerary rewrites. |
+| Omit required image data                                            | Arbitrary places render consistently without repetitive, licensed, or stale imagery.                    | Mandatory local or generated images.                         |
 
 ## Open Questions
 
@@ -612,13 +828,14 @@ Custom GPT Action test interface and representative prompts.
 
 1. The initial Custom GPT is private and uses API-key authentication; OAuth and a
    publicly shared GPT are deferred.
-2. The private trip token is supplied in an Action header after the user shares
-   the trip link within the conversation.
+2. The private GPT is bound to one trip using the server-only
+   `TRIP_GPT_TRIP_TOKEN` environment variable.
 3. ChatGPT may supply a source URL, but the app validates it, labels it as a
    supplied source, and always offers generated Maps links.
 4. Images are optional and no longer part of the place contract.
 5. Optimization runs during relevant mutations and creates reviewable proposals;
-   it does not require an autonomous worker or an OpenAI API key.
+   it does not require an autonomous worker and remains separate from embedded
+   Ask's narrative-only planning advice.
 
 ### Deferred
 
@@ -631,3 +848,5 @@ Custom GPT Action test interface and representative prompts.
 
 - [OpenAI: Getting started with GPT Actions](https://developers.openai.com/api/docs/actions/getting-started)
 - [OpenAI: GPT Action authentication](https://developers.openai.com/api/docs/actions/authentication)
+- [OpenAI: Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+- [OpenAI: Responses API](https://developers.openai.com/api/reference/cli/resources/responses/methods/create)

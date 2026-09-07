@@ -2,7 +2,203 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 import { makeTripV2, SHARE_TOKEN } from "../web/fixtures";
-import { mockTripApi } from "./mock-api";
+import { createMockTripBackend, mockTripApi } from "./mock-api";
+
+// @spec CHAT-UI-001
+test("provides Ask as the fourth trip navigation destination", async ({
+  page,
+}) => {
+  await mockTripApi(page);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  const navigation = page.getByRole("navigation", { name: "Trip" });
+  await expect(navigation.getByRole("link")).toHaveCount(4);
+  await expect(navigation.getByRole("link", { name: "Ask" })).toBeVisible();
+});
+
+// @spec CHAT-DATA-005, CHAT-UI-002, CHAT-UI-004, CHAT-UI-005, CHAT-UI-007, CHAT-BE-004, CHAT-BE-005, CHAT-BE-014
+test("adds a reviewed Ask suggestion to Ideas for collaborators without scheduling it", async ({
+  page,
+  browser,
+}) => {
+  const backend = createMockTripBackend();
+  await mockTripApi(page, backend);
+  const collaboratorContext = await browser.newContext();
+  const collaborator = await collaboratorContext.newPage();
+  await mockTripApi(collaborator, backend);
+  try {
+    await page.goto(`/trip#${SHARE_TOKEN}`);
+    await page.getByRole("link", { name: "Ideas" }).click();
+    await expect(
+      page.getByRole("article", { name: "La Jolla Cove" }),
+    ).toHaveCount(0);
+
+    await collaborator.goto(`/trip#${SHARE_TOKEN}`);
+    await collaborator.getByRole("link", { name: "Ideas" }).click();
+    await expect(
+      collaborator.getByRole("article", { name: "La Jolla Cove" }),
+    ).toHaveCount(0);
+
+    await page.getByRole("link", { name: "Ask" }).click();
+    await page
+      .getByLabel("Ask about this trip")
+      .fill("A relaxed coastal morning?");
+    await page.getByRole("button", { name: "Send" }).click();
+    const suggestion = page.getByRole("article", { name: "La Jolla Cove" });
+    await expect(suggestion).toBeVisible();
+    await expect(
+      suggestion.getByRole("link", { name: "Learn more" }),
+    ).toHaveAttribute(
+      "href",
+      "https://www.sandiego.gov/lifeguards/beaches/cove",
+    );
+    await suggestion
+      .getByRole("button", { name: "Add La Jolla Cove to trip" })
+      .click();
+    await expect(suggestion.getByText("Saved to Ideas")).toBeVisible();
+
+    await page.getByRole("link", { name: "Ideas" }).click();
+    const savedPlace = page.getByRole("article", { name: "La Jolla Cove" });
+    await expect(savedPlace).toBeVisible();
+    await expect(
+      savedPlace.getByRole("link", { name: "Visit source" }),
+    ).toHaveAttribute(
+      "href",
+      "https://www.sandiego.gov/lifeguards/beaches/cove",
+    );
+    await page.getByRole("link", { name: "Plan" }).click();
+    await expect(
+      page.getByTestId("itinerary-item").filter({ hasText: "La Jolla Cove" }),
+    ).toHaveCount(0);
+
+    await collaborator.reload();
+    await collaborator.getByRole("link", { name: "Ideas" }).click();
+    await expect(
+      collaborator.getByRole("article", { name: "La Jolla Cove" }),
+    ).toBeVisible();
+  } finally {
+    await collaboratorContext.close();
+  }
+});
+
+// @spec CHAT-BE-004, CHAT-UI-004, CHAT-UI-005
+test("reconciles a committed suggestion when the first response is interrupted", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend(makeTripV2(), {
+    dropFirstSuggestionResponse: true,
+  });
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  await page.getByRole("link", { name: "Ask" }).click();
+  await page
+    .getByLabel("Ask about this trip")
+    .fill("A relaxed coastal morning?");
+  await page.getByRole("button", { name: "Send" }).click();
+  const suggestion = page.getByRole("article", { name: "La Jolla Cove" });
+  await expect(suggestion).toBeVisible();
+  await suggestion
+    .getByRole("button", { name: "Add La Jolla Cove to trip" })
+    .click();
+  await expect(suggestion.getByText("Saved to Ideas")).toBeVisible();
+  await expect(
+    suggestion.getByText("Could not save this suggestion"),
+  ).toHaveCount(0);
+});
+
+// @spec CHAT-BE-002, CHAT-BE-010, CHAT-BE-011, CHAT-UI-008, CHAT-UI-009
+test("finds an explicitly requested saved place without changing the trip", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend();
+  const originalTrip = structuredClone(backend.getTrip());
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  await page.getByRole("link", { name: "Ask" }).click();
+  await page
+    .getByLabel("Ask about this trip")
+    .fill("Show me my saved Mexican ideas");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const match = page.getByTestId("saved-match-card");
+  await expect(match).toHaveAttribute("aria-label", "Oscar's Mexican Seafood");
+  await expect(match).toContainText("Casual seafood tacos");
+  await expect(match).toContainText(/tacos.*casual/i);
+  await expect(
+    match.getByRole("link", { name: "Visit source" }),
+  ).toHaveAttribute("href", "https://oscarsmexicanseafood.com/");
+  await expect(match.getByRole("link", { name: "Apple Maps" })).toBeVisible();
+  await expect(match.getByRole("link", { name: "Google Maps" })).toBeVisible();
+  await expect(match.getByRole("link", { name: "Directions" })).toBeVisible();
+  await expect(match.getByRole("button", { name: /add .* trip/i })).toHaveCount(
+    0,
+  );
+
+  await match
+    .getByRole("button", { name: "View Oscar's Mexican Seafood in Ideas" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Ideas worth keeping close" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("article", { name: "Oscar's Mexican Seafood" }),
+  ).toBeVisible();
+  expect(backend.getTrip()).toEqual(originalTrip);
+});
+
+// @spec CHAT-BE-020, CHAT-UI-002, CHAT-UI-004, CHAT-UI-005
+test("keeps saved ideas out of general discovery searches", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend();
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  await page.getByRole("link", { name: "Ask" }).click();
+  await page.getByLabel("Ask about this trip").fill("I'm feeling Mexican food");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByTestId("saved-match-card")).toHaveCount(0);
+  await expect(page.getByRole("article", { name: "La Puerta" })).toBeVisible();
+  expect(backend.getTrip()).toEqual(makeTripV2());
+});
+
+// @spec CHAT-BE-002, CHAT-BE-015, CHAT-BE-016, CHAT-BE-019, CHAT-API-011, CHAT-UI-010
+test("automatically adds and renders a verified source for an unsourced saved match", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend();
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  expect(
+    backend
+      .getTrip()
+      .places.find((place: { id: string }) => place.id === "place-torrey-pines")
+      ?.sourceUrl,
+  ).toBeNull();
+
+  await page.getByRole("link", { name: "Ask" }).click();
+  await page
+    .getByLabel("Ask about this trip")
+    .fill("Tell me about Torrey Pines");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const match = page.getByTestId("saved-match-card");
+  await expect(match).toHaveAttribute(
+    "aria-label",
+    "Torrey Pines State Reserve",
+  );
+  await expect(
+    match.getByRole("link", { name: "Visit source" }),
+  ).toHaveAttribute("href", "https://www.parks.ca.gov/torreypines");
+  const changed = backend.getTrip();
+  expect(changed.version).toBe(2);
+  expect(
+    changed.places.find(
+      (place: { id: string }) => place.id === "place-torrey-pines",
+    )?.sourceUrl,
+  ).toBe("https://www.parks.ca.gov/torreypines");
+  expect(changed.itinerary).toEqual([]);
+  expect(changed.proposals).toEqual([]);
+});
 
 // @spec TRIP-UI-001, TRIP-UI-002, TRIP-UI-003
 test("creates a trip after explaining the private link model", async ({

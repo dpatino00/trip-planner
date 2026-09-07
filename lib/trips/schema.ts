@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { suggestedPlaceSchema } from "@/lib/chat/schema";
+
 const date = z.iso.date();
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const interest = z.enum([
@@ -264,6 +266,12 @@ const mutation = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("add-place"), place: savedPlaceSchema }).strict(),
+  z
+    .object({
+      type: z.literal("add-suggested-place"),
+      suggestion: suggestedPlaceSchema,
+    })
+    .strict(),
   z
     .object({
       type: z.literal("update-place"),

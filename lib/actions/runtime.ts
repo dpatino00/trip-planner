@@ -30,10 +30,14 @@ export function getActionHandlers() {
     (process.env.NODE_ENV === "production"
       ? ""
       : "local-trip-gpt-action-key-32-bytes-minimum");
+  const actionTripToken =
+    process.env.TRIP_GPT_TRIP_TOKEN ??
+    (process.env.NODE_ENV === "production" ? "" : "local-trip-gpt-token22");
   configured = createActionHandlers({
     repository,
     rateLimiter: createRateLimiter(),
     actionKey,
+    actionTripToken,
   });
   return configured;
 }
