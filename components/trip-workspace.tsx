@@ -459,13 +459,14 @@ export function TripWorkspace() {
         await tripState.mutate({ trip: outcome.trip }, false);
         setCachedTrip(outcome.trip);
         await saveTripSnapshot(token, outcome.trip);
-        return { status: "conflict" as const };
+        return { status: "conflict" as const, trip: outcome.trip };
       }
       await tripState.mutate({ trip: outcome.trip }, false);
       setCachedTrip(outcome.trip);
       await saveTripSnapshot(token, outcome.trip);
       return {
         status: outcome.duplicate ? ("duplicate" as const) : ("saved" as const),
+        trip: outcome.trip,
       };
     } catch (cause) {
       setMutationError(
@@ -514,6 +515,63 @@ export function TripWorkspace() {
         // Preserve the original mutation error when reconciliation is also unavailable.
       }
       return outcome;
+    })();
+  }
+
+  // @spec CHAT-BE-025, CHAT-BE-027, CHAT-BE-028, CHAT-UI-013
+  function addSuggestedPlaces(suggestions: SuggestedPlace[]) {
+    return (async () => {
+      const originalTrip = trip;
+      if (!originalTrip) {
+        return { statuses: suggestions.map(() => "error" as const) };
+      }
+      const statusesFromTrip = (currentTrip: TripDocument) =>
+        suggestions.map((suggestion) => {
+          if (
+            originalTrip.places.some((place) =>
+              matchesSuggestedPlace(place, suggestion),
+            )
+          ) {
+            return "duplicate" as const;
+          }
+          return currentTrip.places.some((place) =>
+            matchesSuggestedPlace(place, suggestion),
+          )
+            ? ("saved" as const)
+            : ("error" as const);
+        });
+      const outcome = await performMutation(
+        { type: "add-suggested-places", suggestions },
+        suggestions,
+      );
+      if (outcome.status === "conflict") {
+        return { statuses: suggestions.map(() => "conflict" as const) };
+      }
+      if (outcome.status !== "error" && outcome.trip) {
+        return { statuses: statusesFromTrip(outcome.trip) };
+      }
+      if (!token) return { statuses: suggestions.map(() => "error" as const) };
+
+      try {
+        const refreshed = await tripState.mutate();
+        const refreshedTrip = refreshed?.trip;
+        if (
+          refreshedTrip &&
+          suggestions.every((suggestion) =>
+            refreshedTrip.places.some((place) =>
+              matchesSuggestedPlace(place, suggestion),
+            ),
+          )
+        ) {
+          setCachedTrip(refreshedTrip);
+          await saveTripSnapshot(token, refreshedTrip);
+          setMutationError("");
+          return { statuses: statusesFromTrip(refreshedTrip) };
+        }
+      } catch {
+        // Preserve the original mutation error when reconciliation is unavailable.
+      }
+      return { statuses: suggestions.map(() => "error" as const) };
     })();
   }
 
@@ -1075,6 +1133,7 @@ export function TripWorkspace() {
             trip={trip}
             online={!isOffline}
             onAddSuggestion={addSuggestedPlace}
+            onAddSuggestions={addSuggestedPlaces}
             onViewSavedPlace={viewSavedPlace}
             onTripVersion={refreshTripAfterAsk}
           />

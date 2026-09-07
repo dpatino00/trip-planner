@@ -19,7 +19,11 @@ const daypartSchema = z.enum([
   "evening",
 ]);
 
-const savedPlaceIdsSchema = z.array(z.string().trim().min(1).max(120)).max(3);
+const placeIdSchema = z.string().trim().min(1).max(120);
+const savedPlaceIdsSchema = z.array(placeIdSchema).max(12);
+const uniqueSavedPlaceIdsSchema = savedPlaceIdsSchema.refine(
+  (values) => new Set(values).size === values.length,
+);
 const savedPlaceSourceCandidateSchema = z
   .object({
     savedPlaceId: z.string().trim().min(1).max(120),
@@ -28,7 +32,7 @@ const savedPlaceSourceCandidateSchema = z
   .strict();
 const savedPlaceSourcesSchema = z
   .array(savedPlaceSourceCandidateSchema)
-  .max(3)
+  .max(12)
   .refine(
     (values) =>
       new Set(values.map((value) => value.savedPlaceId)).size === values.length,
@@ -69,13 +73,62 @@ const sourcedSuggestedPlaceSchema = suggestedPlaceSchema.extend({
   sourceUrl: z.string().url().startsWith("https://"),
 });
 
-// @spec CHAT-DATA-002, CHAT-API-011
+function normalizedValue(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function uniqueSuggestionKeys(
+  values: Array<{ name: string; locality: string | null }>,
+) {
+  const keys = values.map(
+    (value) =>
+      `${normalizedValue(value.name)}|${normalizedValue(value.locality ?? "")}`,
+  );
+  return new Set(keys).size === keys.length;
+}
+
+const unresolvedPlaceNamesSchema = z
+  .array(z.string().trim().min(1).max(120))
+  .max(12)
+  .refine(
+    (values) =>
+      new Set(values.map((value) => normalizedValue(value))).size ===
+      values.length,
+  );
+
+// @spec CHAT-DATA-002, CHAT-DATA-005, CHAT-DATA-007, CHAT-API-011
 export const tripChatResponseSchema = z
   .object({
     message: z.string().trim().min(1).max(2000),
-    savedPlaceIds: savedPlaceIdsSchema.refine(
-      (values) => new Set(values).size === values.length,
-    ),
+    savedPlaceIds: uniqueSavedPlaceIdsSchema,
+    suggestions: z
+      .array(suggestedPlaceSchema)
+      .max(12)
+      .refine(uniqueSuggestionKeys),
+    unresolvedPlaceNames: unresolvedPlaceNamesSchema,
+    tripVersion: z.number().int().positive(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const resultCount =
+      value.savedPlaceIds.length +
+      value.suggestions.length +
+      value.unresolvedPlaceNames.length;
+    if (resultCount > 12) {
+      context.addIssue({
+        code: "custom",
+        message: "Ask response exceeds twelve combined results",
+      });
+    }
+  });
+
+export const tripChatResponseV2Schema = z
+  .object({
+    message: z.string().trim().min(1).max(2000),
+    savedPlaceIds: z
+      .array(placeIdSchema)
+      .max(3)
+      .refine((values) => new Set(values).size === values.length),
     suggestions: z.array(sourcedSuggestedPlaceSchema).max(3),
     tripVersion: z.number().int().positive(),
   })
@@ -89,7 +142,11 @@ export const tripChatCandidateResponseSchema = z
     message: z.string().trim().min(1).max(2000),
     savedPlaceIds: savedPlaceIdsSchema,
     savedPlaceSources: savedPlaceSourcesSchema,
-    suggestions: z.array(suggestedPlaceSchema).max(3),
+    suggestions: z.array(suggestedPlaceSchema).max(12),
+    unresolvedPlaceNames: z
+      .array(z.string().trim().min(1).max(120))
+      .max(12)
+      .default([]),
   })
   .strict();
 
@@ -122,9 +179,10 @@ const savedPlaceSourceModelSchema = z
 export const tripChatModelResponseSchema = z
   .object({
     message: z.string(),
-    savedPlaceIds: z.array(z.string()).max(3),
-    savedPlaceSources: z.array(savedPlaceSourceModelSchema).max(3),
-    suggestions: z.array(suggestedPlaceModelSchema).max(3),
+    savedPlaceIds: z.array(z.string()).max(12),
+    savedPlaceSources: z.array(savedPlaceSourceModelSchema).max(12),
+    suggestions: z.array(suggestedPlaceModelSchema).max(12),
+    unresolvedPlaceNames: z.array(z.string()).max(12),
   })
   .strict();
 
@@ -135,10 +193,10 @@ const historyItemSchema = z
   })
   .strict();
 
-// @spec CHAT-API-001, CHAT-API-004
+// @spec CHAT-API-001, CHAT-API-004, CHAT-DATA-008
 export const tripChatRequestSchema = z
   .object({
-    message: z.string().trim().min(1).max(2000),
+    message: z.string().trim().min(1).max(8000),
     history: z.array(historyItemSchema).max(8),
   })
   .strict()
@@ -155,6 +213,10 @@ export const tripChatRequestSchema = z
       });
     }
   });
+
+export const tripChatRequestV2Schema = tripChatRequestSchema.safeExtend({
+  message: z.string().trim().min(1).max(2000),
+});
 
 export type TripChatRequest = z.infer<typeof tripChatRequestSchema>;
 export type TripChatResponse = z.infer<typeof tripChatResponseSchema>;

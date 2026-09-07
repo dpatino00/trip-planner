@@ -13,19 +13,30 @@ interface ChatMessageProps {
   online: boolean;
   statusFor: (index: number) => SuggestionStatus;
   onAdd: (suggestion: SuggestedPlace, index: number) => void;
+  onAddAll: (suggestions: SuggestedPlace[], indexes: number[]) => void;
   onDismiss: (index: number) => void;
   onViewSavedPlace: (placeId: string) => void;
 }
 
+// @spec CHAT-UI-002, CHAT-UI-006, CHAT-UI-012, CHAT-UI-013, CHAT-UI-014
 export function ChatMessage({
   message,
   savedPlaces,
   online,
   statusFor,
   onAdd,
+  onAddAll,
   onDismiss,
   onViewSavedPlace,
 }: ChatMessageProps) {
+  const addableSuggestions = message.suggestions.flatMap(
+    (suggestion, index) => {
+      const status = statusFor(index);
+      return status === "saved" || status === "duplicate"
+        ? []
+        : [{ suggestion, index }];
+    },
+  );
   return (
     <div className={`chat-message ${message.role}`}>
       <p className="chat-role">
@@ -50,6 +61,25 @@ export function ChatMessage({
       ) : null}
       {message.suggestions.length > 0 ? (
         <div className="suggestion-list">
+          {addableSuggestions.length > 1 ? (
+            <button
+              className="primary add-all-suggestions"
+              disabled={
+                !online ||
+                addableSuggestions.some(
+                  ({ index }) => statusFor(index) === "adding",
+                )
+              }
+              onClick={() =>
+                onAddAll(
+                  addableSuggestions.map(({ suggestion }) => suggestion),
+                  addableSuggestions.map(({ index }) => index),
+                )
+              }
+            >
+              Add all new
+            </button>
+          ) : null}
           {message.suggestions.map((suggestion, index) => (
             <SuggestionCard
               key={`${suggestion.name}-${suggestion.locality ?? ""}-${index}`}
@@ -60,6 +90,19 @@ export function ChatMessage({
               onDismiss={() => onDismiss(index)}
             />
           ))}
+        </div>
+      ) : null}
+      {message.unresolvedPlaceNames.length > 0 ? (
+        <div
+          className="unresolved-place-list"
+          aria-label="Places needing clarification"
+        >
+          <p className="why">Needs clarification</p>
+          <ul>
+            {message.unresolvedPlaceNames.map((name) => (
+              <li key={name}>{name}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
     </div>

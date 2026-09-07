@@ -61,7 +61,7 @@ interface Dependencies {
   idFactory?: () => string;
 }
 
-// @spec TRIP-API-001, TRIP-API-002, TRIP-API-003, TRIP-API-004, TRIP-API-005, TRIP-API-006, TRIP-API-007, TRIP-API-008, TRIP-API-009, TRIP-API-010, TRIP-API-011, TRIP-API-012, TRIP-BE-003, TRIP-BE-004, TRIP-BE-005, SEC-API-003
+// @spec TRIP-API-001, TRIP-API-002, TRIP-API-003, TRIP-API-004, TRIP-API-005, TRIP-API-006, TRIP-API-007, TRIP-API-008, TRIP-API-009, TRIP-API-010, TRIP-API-011, TRIP-API-012, TRIP-BE-003, TRIP-BE-004, TRIP-BE-005, CHAT-BE-025, CHAT-BE-026, SEC-API-003
 export function createTripHandlers({
   repository,
   rateLimiter,
@@ -207,23 +207,38 @@ export function createTripHandlers({
           );
         let changed: TripDocument;
         try {
-          if (requestBody.mutation.type === "add-suggested-place") {
-            const created = createSuggestedPlace(
-              requestBody.mutation.suggestion,
-              current.places,
-              { clock, idFactory },
-            );
-            if (created.duplicate) {
+          if (
+            requestBody.mutation.type === "add-suggested-place" ||
+            requestBody.mutation.type === "add-suggested-places"
+          ) {
+            const suggestions =
+              requestBody.mutation.type === "add-suggested-place"
+                ? [requestBody.mutation.suggestion]
+                : requestBody.mutation.suggestions;
+            let next = current;
+            let addedCount = 0;
+            const warnings: string[] = [];
+            for (const suggestion of suggestions) {
+              const created = createSuggestedPlace(suggestion, next.places, {
+                clock,
+                idFactory,
+              });
+              warnings.push(...created.warnings);
+              if (created.duplicate) continue;
+              next = applyTripMutation(next, {
+                type: "add-place",
+                place: created.place,
+              });
+              addedCount += 1;
+            }
+            if (addedCount === 0) {
               return result({
                 trip: current,
                 duplicate: true,
-                warnings: created.warnings,
+                warnings,
               });
             }
-            changed = applyTripMutation(current, {
-              type: "add-place",
-              place: created.place,
-            });
+            changed = next;
           } else {
             changed = applyTripMutation(current, requestBody.mutation);
           }

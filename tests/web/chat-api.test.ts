@@ -34,7 +34,7 @@ function chatRequest(
     token?: string;
     ip?: string;
     raw?: string;
-    contractVersion?: 2 | null;
+    contractVersion?: 2 | 3 | null;
   } = {},
 ) {
   const headers = new Headers({
@@ -45,7 +45,7 @@ function chatRequest(
     headers.set("authorization", `Bearer ${options.token}`);
   }
   if (options.contractVersion !== null) {
-    headers.set("x-trip-chat-contract", "2");
+    headers.set("x-trip-chat-contract", String(options.contractVersion ?? 3));
   }
   return new Request("https://trip.test/api/trip/chat", {
     method: "POST",
@@ -75,6 +75,7 @@ async function setup(
               savedPlaceIds: [],
               savedPlaceSources: [],
               suggestions: [suggestion],
+              unresolvedPlaceNames: [],
             },
             sources: [trustedSourceUrl],
             usage: { inputTokens: 120, outputTokens: 80, totalTokens: 200 },
@@ -117,6 +118,7 @@ it("loads authoritative bounded context, logs metadata, and avoids unrelated mut
     message: "Try the coast this morning.",
     savedPlaceIds: [],
     suggestions: [suggestion],
+    unresolvedPlaceNames: [],
     tripVersion: 1,
   });
   expect(get).toHaveBeenCalledOnce();
@@ -166,6 +168,26 @@ it("omits the additive trip version for a legacy cached client", async () => {
   });
 });
 
+// @spec CHAT-API-012
+it("keeps the version-2 four-field response compatible", async () => {
+  const { POST } = await setup();
+
+  const response = await POST(
+    chatRequest(
+      { message: "What fits this morning?", history: [] },
+      { token: SHARE_TOKEN, contractVersion: 2 },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    message: "Try the coast this morning.",
+    savedPlaceIds: [],
+    suggestions: [suggestion],
+    tripVersion: 1,
+  });
+});
+
 // @spec CHAT-API-002, CHAT-API-003
 it("authenticates before storage and distinguishes an unknown trip", async () => {
   const { POST, repository } = await setup();
@@ -185,11 +207,11 @@ it("authenticates before storage and distinguishes an unknown trip", async () =>
   ).toBe(404);
 });
 
-// @spec CHAT-API-004, CHAT-API-005
+// @spec CHAT-API-001, CHAT-API-004, CHAT-API-005, CHAT-DATA-008
 describe("chat input boundaries", () => {
   it.each([
     { message: "", history: [] },
-    { message: "x".repeat(2001), history: [] },
+    { message: "x".repeat(8001), history: [] },
     {
       message: "hi",
       history: Array.from({ length: 9 }, () => ({
@@ -205,12 +227,57 @@ describe("chat input boundaries", () => {
     expect(model!.generate).not.toHaveBeenCalled();
   });
 
+  it("accepts an 8,000-character version-3 message without sending card data as history", async () => {
+    const { POST, model } = await setup();
+    const response = await POST(
+      chatRequest(
+        {
+          message: "x".repeat(8000),
+          history: [{ role: "assistant", content: "Earlier answer" }],
+        },
+        { token: SHARE_TOKEN, contractVersion: 3 },
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(model!.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        history: [{ role: "assistant", content: "Earlier answer" }],
+      }),
+    );
+    expect(
+      JSON.stringify(vi.mocked(model!.generate).mock.calls[0][0].history),
+    ).not.toMatch(/savedPlaceIds|suggestions|unresolvedPlaceNames/);
+  });
+
+  it("retains the 2,000-character limit for version-2 clients", async () => {
+    const { POST, model } = await setup();
+    const response = await POST(
+      chatRequest(
+        { message: "x".repeat(2001), history: [] },
+        { token: SHARE_TOKEN, contractVersion: 2 },
+      ),
+    );
+    expect(response.status).toBe(400);
+    expect(model!.generate).not.toHaveBeenCalled();
+  });
+
   it("rejects oversized bodies and the exact credential in content", async () => {
     const { POST, model } = await setup();
-    const oversized = await POST(
-      chatRequest({}, { token: SHARE_TOKEN, raw: "x".repeat(16 * 1024 + 1) }),
+    const oversizedV3 = await POST(
+      chatRequest({}, { token: SHARE_TOKEN, raw: "x".repeat(32 * 1024 + 1) }),
     );
-    expect(oversized.status).toBe(413);
+    expect(oversizedV3.status).toBe(413);
+    const oversizedV2 = await POST(
+      chatRequest(
+        {},
+        {
+          token: SHARE_TOKEN,
+          contractVersion: 2,
+          raw: "x".repeat(16 * 1024 + 1),
+        },
+      ),
+    );
+    expect(oversizedV2.status).toBe(413);
     const leaked = await POST(
       chatRequest(
         { message: `Use ${SHARE_TOKEN}`, history: [] },
@@ -223,9 +290,9 @@ describe("chat input boundaries", () => {
 });
 
 // @spec CHAT-API-006, CHAT-API-007
-it("enforces ten-per-pair and one-hundred-per-trip allowances", async () => {
+it("enforces twenty-five-per-pair and two-hundred-fifty-per-trip allowances", async () => {
   const { POST } = await setup();
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 25; index += 1) {
     expect(
       (
         await POST(
@@ -249,8 +316,8 @@ it("enforces ten-per-pair and one-hundred-per-trip allowances", async () => {
   ).toBe(429);
 
   const daily = await setup();
-  for (let index = 0; index < 100; index += 1) {
-    const ip = `198.51.100.${Math.floor(index / 10) + 1}`;
+  for (let index = 0; index < 250; index += 1) {
+    const ip = `198.51.100.${Math.floor(index / 25) + 1}`;
     expect(
       (
         await daily.POST(
@@ -318,6 +385,46 @@ it("fails closed for configuration, timeout, and malformed model output", async 
       )
     ).status,
   ).toBe(502);
+});
+
+// @spec CHAT-API-009
+it("uses a forty-five-second timeout only for explicit addition batches", async () => {
+  vi.useFakeTimers();
+  try {
+    const hanging: TripChatModel = {
+      generate: vi.fn(() => new Promise<never>(() => {})),
+    };
+    const { POST } = await setup({ model: hanging });
+    const standardResponse = POST(
+      chatRequest(
+        { message: "Suggest something new", history: [] },
+        { token: SHARE_TOKEN },
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect((await standardResponse).status).toBe(504);
+
+    let additionSettled = false;
+    const additionResponse = POST(
+      chatRequest(
+        {
+          message:
+            "Please add La Puerta, Ironside Fish & Oyster, and Garage Kitchen + Bar.",
+          history: [],
+        },
+        { token: SHARE_TOKEN },
+      ),
+    ).then((response) => {
+      additionSettled = true;
+      return response;
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(additionSettled).toBe(false);
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect((await additionResponse).status).toBe(504);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 // @spec CHAT-DATA-001, CHAT-DATA-005, CHAT-BE-009, CHAT-BE-013, SEC-API-006
@@ -436,6 +543,77 @@ it("returns authoritative saved matches in model order and suppresses new sugges
     message: "You already saved two good fits.",
     savedPlaceIds: ["place-tacos", "place-balboa-park"],
     suggestions: [],
+    unresolvedPlaceNames: [],
+    tripVersion: 1,
+  });
+  expect(update).not.toHaveBeenCalled();
+});
+
+// @spec CHAT-DATA-002, CHAT-DATA-005, CHAT-DATA-007, CHAT-BE-002, CHAT-BE-011, CHAT-BE-013, CHAT-BE-021, CHAT-BE-022, CHAT-BE-023
+it("returns saved, new, and unresolved results together for an explicit addition batch", async () => {
+  const dealSummary =
+    "A lively Gaslamp Mexican restaurant for a downtown meal. The supplied notes list daily happy hour from 3–5 PM with margarita and food specials; details are unverified.";
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "I found two cards and one existing place.",
+        savedPlaceIds: ["place-tacos", "unknown-place", "place-tacos"],
+        savedPlaceSources: [],
+        suggestions: [
+          {
+            ...suggestion,
+            name: "La Puerta",
+            locality: "Gaslamp",
+            summary: dealSummary,
+            sourceUrl: null,
+          },
+          {
+            ...suggestion,
+            name: "Ironside Fish & Oyster",
+            locality: "Little Italy",
+            tags: ["seafood", "oysters", "little italy"],
+            sourceUrl: trustedSourceUrl,
+          },
+        ],
+        unresolvedPlaceNames: [
+          "Garage Kitchen + Bar",
+          " garage kitchen + bar ",
+          "La Puerta",
+        ],
+      },
+      sources: [trustedSourceUrl],
+    }),
+  };
+  const { POST, repository } = await setup({ model });
+  const update = vi.spyOn(repository, "update");
+
+  const response = await POST(
+    chatRequest(
+      {
+        message:
+          "Please add La Puerta — Gaslamp, Ironside Fish & Oyster — Little Italy, Garage Kitchen + Bar, and my saved taco place.",
+        history: [],
+      },
+      { token: SHARE_TOKEN, contractVersion: 3 },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    message: "I found two cards and one existing place.",
+    savedPlaceIds: ["place-tacos"],
+    suggestions: [
+      expect.objectContaining({
+        name: "La Puerta",
+        summary: dealSummary,
+        sourceUrl: null,
+      }),
+      expect.objectContaining({
+        name: "Ironside Fish & Oyster",
+        sourceUrl: trustedSourceUrl,
+      }),
+    ],
+    unresolvedPlaceNames: ["Garage Kitchen + Bar"],
     tripVersion: 1,
   });
   expect(update).not.toHaveBeenCalled();
@@ -504,6 +682,7 @@ it("deduplicates model IDs while enforcing uniqueness and summary quality at the
       message: "Matches",
       savedPlaceIds: ["place-tacos", "place-tacos"],
       suggestions: [],
+      unresolvedPlaceNames: [],
       tripVersion: 1,
     }).success,
   ).toBe(false);
@@ -512,22 +691,25 @@ it("deduplicates model IDs while enforcing uniqueness and summary quality at the
       message: "Missing source",
       savedPlaceIds: [],
       suggestions: [{ ...suggestion, sourceUrl: null }],
+      unresolvedPlaceNames: [],
       tripVersion: 1,
     }).success,
-  ).toBe(false);
+  ).toBe(true);
   expect(
     tripChatResponseSchema.safeParse({
       message: "Too many matches",
       savedPlaceIds: ["one", "two", "three", "four"],
       suggestions: [],
+      unresolvedPlaceNames: [],
       tripVersion: 1,
     }).success,
-  ).toBe(false);
+  ).toBe(true);
   expect(
     tripChatResponseSchema.safeParse({
       message: "Invalid tag",
       savedPlaceIds: [],
       suggestions: [{ ...suggestion, tags: ["Mexican"] }],
+      unresolvedPlaceNames: [],
       tripVersion: 1,
     }).success,
   ).toBe(false);
@@ -556,6 +738,41 @@ it("deduplicates model IDs while enforcing uniqueness and summary quality at the
   ).toBe(502);
 });
 
+// @spec CHAT-DATA-002, CHAT-DATA-007
+it("accepts at most twelve combined unique version-3 results", () => {
+  const unresolvedPlaceNames = Array.from(
+    { length: 12 },
+    (_, index) => `Unresolved place ${index + 1}`,
+  );
+  expect(
+    tripChatResponseSchema.safeParse({
+      message: "Twelve results",
+      savedPlaceIds: [],
+      suggestions: [],
+      unresolvedPlaceNames,
+      tripVersion: 1,
+    }).success,
+  ).toBe(true);
+  expect(
+    tripChatResponseSchema.safeParse({
+      message: "Thirteen combined results",
+      savedPlaceIds: ["place-tacos"],
+      suggestions: [],
+      unresolvedPlaceNames,
+      tripVersion: 1,
+    }).success,
+  ).toBe(false);
+  expect(
+    tripChatResponseSchema.safeParse({
+      message: "Duplicate unresolved names",
+      savedPlaceIds: [],
+      suggestions: [],
+      unresolvedPlaceNames: ["Garage Kitchen + Bar", " garage kitchen + BAR "],
+      tripVersion: 1,
+    }).success,
+  ).toBe(false);
+});
+
 // @spec CHAT-DATA-002, CHAT-DATA-006, CHAT-API-011
 it("requires saved-place source candidates and an authoritative trip version in their respective contracts", () => {
   expect(
@@ -569,6 +786,7 @@ it("requires saved-place source candidates and an authoritative trip version in 
         },
       ],
       suggestions: [],
+      unresolvedPlaceNames: [],
     }).success,
   ).toBe(true);
   expect(
@@ -586,6 +804,37 @@ it("requires saved-place source candidates and an authoritative trip version in 
         },
       ],
       suggestions: [],
+      unresolvedPlaceNames: [],
+    }).success,
+  ).toBe(false);
+  const twelveSourceCandidates = Array.from({ length: 12 }, (_, index) => ({
+    savedPlaceId: `place-${index + 1}`,
+    sourceUrl: `https://example.com/place-${index + 1}`,
+  }));
+  expect(
+    tripChatCandidateResponseSchema.safeParse({
+      message: "A large saved batch",
+      savedPlaceIds: twelveSourceCandidates.map(
+        (candidate) => candidate.savedPlaceId,
+      ),
+      savedPlaceSources: twelveSourceCandidates,
+      suggestions: [],
+      unresolvedPlaceNames: [],
+    }).success,
+  ).toBe(true);
+  expect(
+    tripChatCandidateResponseSchema.safeParse({
+      message: "Too many source candidates",
+      savedPlaceIds: [],
+      savedPlaceSources: [
+        ...twelveSourceCandidates,
+        {
+          savedPlaceId: "place-13",
+          sourceUrl: "https://example.com/place-13",
+        },
+      ],
+      suggestions: [],
+      unresolvedPlaceNames: [],
     }).success,
   ).toBe(false);
   expect(
@@ -593,6 +842,7 @@ it("requires saved-place source candidates and an authoritative trip version in 
       message: "A saved match",
       savedPlaceIds: ["place-torrey-pines"],
       suggestions: [],
+      unresolvedPlaceNames: [],
     }).success,
   ).toBe(false);
 });
@@ -627,6 +877,7 @@ it("atomically adds a current-search source to a matched saved place without cha
     message: "Torrey Pines is already in your Ideas.",
     savedPlaceIds: ["place-torrey-pines"],
     suggestions: [],
+    unresolvedPlaceNames: [],
     tripVersion: 2,
   });
   expect(update).toHaveBeenCalledOnce();

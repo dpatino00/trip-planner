@@ -242,7 +242,9 @@ export type TripMutation =
   | { type: "dismiss-plan-proposal"; proposalId: string };
 
 export type TripApiMutation =
-  TripMutation | { type: "add-suggested-place"; suggestion: SuggestedPlace };
+  | TripMutation
+  | { type: "add-suggested-place"; suggestion: SuggestedPlace }
+  | { type: "add-suggested-places"; suggestions: SuggestedPlace[] };
 
 export interface TripMutationRequest {
   baseVersion: number;

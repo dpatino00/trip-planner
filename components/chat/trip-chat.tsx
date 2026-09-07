@@ -16,21 +16,47 @@ export interface AddSuggestionResult {
   status: "saved" | "duplicate" | "conflict" | "error";
 }
 
+export interface AddSuggestionsResult {
+  statuses: AddSuggestionResult["status"][];
+}
+
 interface TripChatProps {
   token: string;
   trip: TripDocument;
   online: boolean;
   onAddSuggestion: (suggestion: SuggestedPlace) => Promise<AddSuggestionResult>;
+  onAddSuggestions?: (
+    suggestions: SuggestedPlace[],
+  ) => Promise<AddSuggestionsResult>;
   onViewSavedPlace: (placeId: string) => void;
   onTripVersion?: (version: number) => void | Promise<void>;
 }
 
-// @spec CHAT-API-011, CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-008, CHAT-UI-009, CHAT-UI-010, PWA-UI-007
+// @spec CHAT-DATA-008
+export function buildChatHistory(messages: ChatSessionMessage[]) {
+  let remainingCharacters = 8000;
+  const newestFirst = messages
+    .slice(-8)
+    .reverse()
+    .flatMap(({ role, content }) => {
+      if (remainingCharacters === 0) return [];
+      const boundedContent = content.slice(
+        0,
+        Math.min(2000, remainingCharacters),
+      );
+      remainingCharacters -= boundedContent.length;
+      return boundedContent ? [{ role, content: boundedContent }] : [];
+    });
+  return newestFirst.reverse();
+}
+
+// @spec CHAT-DATA-004, CHAT-API-011, CHAT-API-012, CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-008, CHAT-UI-009, CHAT-UI-010, CHAT-UI-012, CHAT-UI-013, CHAT-UI-014, PWA-UI-007
 export function TripChat({
   token,
   trip,
   online,
   onAddSuggestion,
+  onAddSuggestions,
   onViewSavedPlace,
   onTripVersion,
 }: TripChatProps) {
@@ -73,10 +99,9 @@ export function TripChat({
       content: message,
       savedPlaceIds: [],
       suggestions: [],
+      unresolvedPlaceNames: [],
     };
-    const history = messages
-      .slice(-8)
-      .map(({ role, content }) => ({ role, content }));
+    const history = buildChatHistory(messages);
     setMessages((current) => [...current, userMessage].slice(-12));
     setComposer("");
     setError("");
@@ -87,7 +112,7 @@ export function TripChat({
         headers: {
           authorization: `Bearer ${token}`,
           "content-type": "application/json",
-          "x-trip-chat-contract": "2",
+          "x-trip-chat-contract": "3",
         },
         body: JSON.stringify({ message, history }),
       });
@@ -107,6 +132,7 @@ export function TripChat({
             content: parsed.message,
             savedPlaceIds: parsed.savedPlaceIds,
             suggestions: parsed.suggestions,
+            unresolvedPlaceNames: parsed.unresolvedPlaceNames,
           },
         ].slice(-12),
       );
@@ -117,6 +143,43 @@ export function TripChat({
       setError(cause instanceof Error ? cause.message : "Ask is unavailable");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function addSuggestions(
+    messageId: string,
+    suggestions: SuggestedPlace[],
+    indexes: number[],
+  ) {
+    setStatuses((current) => {
+      const next = { ...current };
+      for (const index of indexes) next[`${messageId}:${index}`] = "adding";
+      return next;
+    });
+    try {
+      const outcome = onAddSuggestions
+        ? await onAddSuggestions(suggestions)
+        : {
+            statuses: await Promise.all(
+              suggestions.map(
+                async (suggestion) =>
+                  (await onAddSuggestion(suggestion)).status,
+              ),
+            ),
+          };
+      setStatuses((current) => {
+        const next = { ...current };
+        for (const [position, index] of indexes.entries()) {
+          next[`${messageId}:${index}`] = outcome.statuses[position] ?? "error";
+        }
+        return next;
+      });
+    } catch {
+      setStatuses((current) => {
+        const next = { ...current };
+        for (const index of indexes) next[`${messageId}:${index}`] = "error";
+        return next;
+      });
     }
   }
 
@@ -181,6 +244,9 @@ export function TripChat({
               void addSuggestion(message.id, suggestion, index)
             }
             onDismiss={(index) => dismissSuggestion(message.id, index)}
+            onAddAll={(suggestions, indexes) =>
+              void addSuggestions(message.id, suggestions, indexes)
+            }
             onViewSavedPlace={onViewSavedPlace}
           />
         ))}
@@ -208,7 +274,7 @@ export function TripChat({
           id="trip-chat-composer"
           aria-label="Ask about this trip"
           value={composer}
-          maxLength={2000}
+          maxLength={8000}
           disabled={!online || !hydrated}
           placeholder="What would fit a relaxed morning?"
           onChange={(event) => setComposer(event.target.value)}
