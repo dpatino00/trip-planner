@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { TripChat } from "@/components/chat/trip-chat";
+import { buildChatHistory, TripChat } from "@/components/chat/trip-chat";
 import { saveChatSession } from "@/lib/chat/session";
 import { makeTripV2, SHARE_TOKEN } from "./fixtures";
 
@@ -28,6 +28,29 @@ const suggestion = {
 
 afterEach(cleanup);
 
+// @spec CHAT-DATA-008
+it("sends only the newest bounded role-and-text history", () => {
+  const messages = Array.from({ length: 8 }, (_, index) => ({
+    id: String(index),
+    role: (index % 2 ? "assistant" : "user") as "assistant" | "user",
+    content: String(index).repeat(3000),
+    savedPlaceIds: ["place-tacos"],
+    suggestions: [suggestion],
+    unresolvedPlaceNames: ["Unknown venue"],
+  }));
+
+  const history = buildChatHistory(messages);
+  expect(history).toHaveLength(4);
+  expect(history.reduce((sum, item) => sum + item.content.length, 0)).toBe(
+    8000,
+  );
+  expect(history.every((item) => item.content.length <= 2000)).toBe(true);
+  expect(history.at(-1)?.content).toBe("7".repeat(2000));
+  expect(JSON.stringify(history)).not.toMatch(
+    /savedPlaceIds|suggestions|unresolvedPlaceNames/,
+  );
+});
+
 // @spec CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-007
 it("submits with Enter, renders suggestions, dismisses locally, and confirms explicitly", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -35,6 +58,7 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
       message: "Try this coastal stop.",
       savedPlaceIds: [],
       suggestions: [suggestion],
+      unresolvedPlaceNames: [],
       tripVersion: 1,
     }),
   );
@@ -60,7 +84,7 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/trip/chat",
     expect.objectContaining({
-      headers: expect.objectContaining({ "x-trip-chat-contract": "2" }),
+      headers: expect.objectContaining({ "x-trip-chat-contract": "3" }),
     }),
   );
   expect(screen.getByText("La Jolla Cove")).toBeVisible();
@@ -101,7 +125,11 @@ it("restores saved matches while disabling generation and confirmation offline",
       role: "assistant",
       content: "This one is already in your trip.",
       savedPlaceIds: ["place-tacos"],
-      suggestions: [],
+      suggestions: [
+        suggestion,
+        { ...suggestion, name: "La Puerta", sourceUrl: null },
+      ],
+      unresolvedPlaceNames: ["Garage Kitchen + Bar"],
     },
   ]);
   render(
@@ -120,9 +148,16 @@ it("restores saved matches while disabling generation and confirmation offline",
     await screen.findByText("This one is already in your trip."),
   ).toBeVisible();
   expect(screen.getByText("Oscar's Mexican Seafood")).toBeVisible();
-  expect(screen.getByRole("link", { name: /Apple Maps/ })).toHaveAccessibleName(
-    /requires connection/i,
-  );
+  expect(screen.getByText("Garage Kitchen + Bar")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Add all new" })).toBeDisabled();
+  expect(
+    screen.getByRole("button", { name: "Add La Jolla Cove to trip" }),
+  ).toBeDisabled();
+  expect(
+    within(screen.getByTestId("saved-match-card")).getByRole("link", {
+      name: /Apple Maps/,
+    }),
+  ).toHaveAccessibleName(/requires connection/i);
 });
 
 // @spec CHAT-UI-005, CHAT-BE-007
@@ -132,6 +167,7 @@ it("retains a suggestion after repeated conflicts so it can be retried", async (
       message: "Try this coastal stop.",
       savedPlaceIds: [],
       suggestions: [suggestion],
+      unresolvedPlaceNames: [],
       tripVersion: 1,
     }),
   );
@@ -166,6 +202,7 @@ it("renders authoritative saved matches in rank order with read-only actions", a
       message: "You already saved these Mexican-food options.",
       savedPlaceIds: ["place-tacos", "place-balboa-park"],
       suggestions: [],
+      unresolvedPlaceNames: [],
       tripVersion: 1,
     }),
   );
@@ -218,6 +255,7 @@ it("formats assistant paragraphs, lists, and safe markdown links", async () => {
         "Here are ideas:\n\n1) Torrey Pines\n2) Balboa Park\n\n[See the official guide](https://www.parks.ca.gov/?page_id=657) <strong>safe text</strong>",
       savedPlaceIds: [],
       suggestions: [],
+      unresolvedPlaceNames: [],
       tripVersion: 1,
     }),
   );
@@ -244,4 +282,78 @@ it("formats assistant paragraphs, lists, and safe markdown links", async () => {
   ).toHaveAttribute("href", "https://www.parks.ca.gov/?page_id=657");
   expect(screen.getByText(/safe text/)).toBeVisible();
   expect(screen.queryByRole("strong")).toBeNull();
+});
+
+// @spec CHAT-DATA-004, CHAT-DATA-008, CHAT-UI-002, CHAT-UI-005, CHAT-UI-007, CHAT-UI-012, CHAT-UI-013, CHAT-UI-014, CHAT-BE-028
+it("renders a batch, explains unresolved names, and adds all new cards together", async () => {
+  const secondSuggestion = {
+    ...suggestion,
+    name: "La Puerta",
+    locality: "Gaslamp",
+    summary:
+      "A lively Gaslamp Mexican restaurant for a downtown meal. Happy-hour details supplied by the traveler remain unverified.",
+    tags: ["mexican", "casual", "gaslamp"],
+    sourceUrl: null,
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({
+      message: "Review these additions.",
+      savedPlaceIds: [],
+      suggestions: [suggestion, secondSuggestion],
+      unresolvedPlaceNames: ["Garage Kitchen + Bar"],
+      tripVersion: 1,
+    }),
+  );
+  const onAddSuggestions = vi.fn().mockResolvedValue({
+    statuses: ["saved", "duplicate"],
+  });
+  render(
+    <TripChat
+      token={SHARE_TOKEN}
+      trip={makeTripV2()}
+      online
+      onAddSuggestion={vi.fn()}
+      onViewSavedPlace={vi.fn()}
+      {...({ onAddSuggestions } as Record<string, unknown>)}
+    />,
+  );
+
+  const composer = screen.getByLabelText("Ask about this trip");
+  await waitFor(() => expect(composer).toBeEnabled());
+  expect(composer).toHaveAttribute("maxlength", "8000");
+  fireEvent.change(composer, {
+    target: {
+      value:
+        "Please add La Jolla Cove, La Puerta, and Garage Kitchen + Bar from these notes.",
+    },
+  });
+  fireEvent.keyDown(composer, { key: "Enter" });
+
+  expect(await screen.findByText("Review these additions.")).toBeVisible();
+  expect(screen.getByText("Garage Kitchen + Bar")).toBeVisible();
+  expect(screen.getByText(/needs clarification/i)).toBeVisible();
+  const laPuerta = screen.getByRole("article", { name: "La Puerta" });
+  expect(
+    within(laPuerta).queryByRole("link", { name: "Learn more" }),
+  ).toBeNull();
+  expect(
+    within(laPuerta).getByRole("link", { name: "Apple Maps" }),
+  ).toBeVisible();
+
+  const addAll = screen.getByRole("button", { name: "Add all new" });
+  fireEvent.click(addAll);
+  await waitFor(() =>
+    expect(onAddSuggestions).toHaveBeenCalledWith([
+      suggestion,
+      secondSuggestion,
+    ]),
+  );
+  expect(await screen.findByText("Saved to Ideas")).toBeVisible();
+  expect(screen.getByText("Already in Ideas")).toBeVisible();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/trip/chat",
+    expect.objectContaining({
+      headers: expect.objectContaining({ "x-trip-chat-contract": "3" }),
+    }),
+  );
 });

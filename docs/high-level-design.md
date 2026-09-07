@@ -1,7 +1,7 @@
 # Conversational Trip Companion — High-Level Design
 
 **Created**: 2026-09-01
-**Last updated**: 2026-09-06
+**Last updated**: 2026-09-07
 
 ## Problem Statement
 
@@ -15,8 +15,11 @@ emerge naturally in conversation.
 The Trip Companion will be a mobile-first shared trip website with an embedded
 Ask experience. Travelers can ask for contextual advice and receive reviewable
 new-place suggestions without leaving the trip; saved ideas are surfaced when
-the traveler explicitly asks about them.
-Only an explicit Add to trip action adds a new place to the shared plan. The
+the traveler explicitly asks about them. Travelers can also paste free-form
+prose, lists, or tables naming up to twelve places and review saved matches,
+new-place cards, and unresolved names together without reformatting the input.
+Only an explicit individual or bulk Add to trip action adds a new place to the
+shared plan. The
 single narrow exception is source-link enrichment: when Ask returns a saved
 place whose source URL is missing, it automatically attaches an exact HTTPS
 reference found in its current bounded web search. The shared trip remains the
@@ -31,7 +34,12 @@ authenticated Actions as an optional secondary client.
 - Let travelers ask an embedded AI for trip-aware narrative advice and discover
   new places without repeating ideas already saved, while supporting explicit
   saved-place and add-to-trip requests.
+- Turn an explicit free-form request containing up to twelve named places into
+  a complete review set that can mix authoritative saved matches, new
+  suggestions, and names requiring clarification.
 - Require explicit confirmation before an AI suggestion changes shared state.
+- Let travelers confirm generated places individually or add all valid new
+  suggestions in one atomic trip update.
 - Automatically add a search-grounded reference link to a matched saved place
   when that place has no source URL, without overwriting existing links or
   changing any other place or itinerary field.
@@ -60,7 +68,7 @@ authenticated Actions as an optional secondary client.
 - Persisting chat history as shared trip data or across browser sessions.
 - Adding embeddings, a vector database, background place enrichment, a separate
   search provider, or a second Ask endpoint for saved-place discovery.
-- Allowing the embedded model to use tools other than one bounded web search for
+- Allowing the embedded model to use tools other than bounded web searches for
   place-reference links, or to directly mutate trip data beyond the server's
   narrowly validated addition of a previously missing saved-place source URL.
 - Allowing the GPT to edit application code, deploy the website, make bookings,
@@ -130,11 +138,20 @@ Responses API for narrative advice plus up to three structured new-place
 suggestions for general discovery. Saved-place IDs are returned only when the
 traveler explicitly asks about saved places, Ideas, the current trip, or adding
 named places; exact saved-place duplicates are excluded from discovery results.
+A distinct explicit-addition path accepts free-form prose, lists, or tables and
+returns a combined review of up to twelve saved matches, new suggestions, and
+unresolved names, so an existing match cannot suppress cards for other named
+places. User-supplied details such as hours, prices, and deals remain concise,
+explicitly unverified summary text; they do not create new persistent place
+fields.
 A requested saved match with no source URL causes the same request to use its one
 bounded web-search call to find an exact HTTPS reference. Every returned
 new-place suggestion includes an exact HTTPS reference URL from that search so
 the traveler can inspect the source before saving; candidates without credible
-search evidence are omitted rather than rendered as unsourced cards.
+search evidence are omitted rather than rendered as unsourced cards during
+general discovery. Explicit-addition requests may use up to four bounded
+searches and retain identifiable suggestions without a verified reference as
+Maps-only cards.
 
 The server validates every returned ID and source against the authoritative trip
 and the current response's search evidence. For a matched saved place with a
@@ -142,14 +159,22 @@ missing source URL, the server may persist that validated URL automatically with
 an atomic, conflict-safe trip update; it never overwrites an existing source URL
 and never changes other place or itinerary fields. The model receives no
 mutation tool. The browser still sends an explicit, versioned trip mutation only
-after a traveler chooses Add to trip for a new suggestion, preserving the
-validated source URL.
+after a traveler chooses an individual Add to trip action or confirms Add all
+new. Bulk confirmation normalizes and deduplicates the suggestions and persists
+all valid new places atomically with one trip version increment, preserving
+validated source URLs.
 
 Embedded Ask requests advertise the browser response-contract version. This
 keeps rolling deployments compatible with an older cached browser bundle: a
 legacy request receives the original response fields, while a current request
 also receives saved-place matches and the authoritative trip version needed to
-refresh automatic source enrichment.
+refresh automatic source enrichment. Contract version three adds bounded batch
+results and unresolved names while version-two and headerless clients continue
+to receive their prior three-item shapes.
+
+Ask permits twenty-five requests per hashed trip/address pair per ten minutes
+and two hundred fifty requests per hashed trip per UTC day. A batch consumes one
+request; the allowance remains request-based rather than token-weighted.
 
 The Action API will require a dedicated, revocable integration key configured as
 the Custom GPT Action's API-key credential. This key is distinct from an OpenAI
@@ -166,15 +191,15 @@ explainable proposals for review. A queue or continuously running agent is not
 required for the initial release.
 
 Existing conversational place data may omit a source URL. New-place suggestions
-from embedded Ask, however, are returned only with an exact HTTPS URL present in
-the current bounded web-search evidence; a URL appearing only in model narrative
-is not sufficient. The interface exposes that URL for review before saving and
-preserves it on the saved place. When Ask matches an existing place with no
-source URL, the same evidence rule applies before the server automatically adds
-the link and returns the updated authoritative place. If the search provides no
-credible exact match or the trip changes concurrently, Ask leaves the place
-unchanged. It can also generate external Maps search links from the place name
-and locality, so missing imagery never blocks a useful card.
+from general discovery, however, are returned only with an exact HTTPS URL
+present in the current bounded web-search evidence; a URL appearing only in
+model narrative is not sufficient. Explicit addition may retain an identifiable
+new place without that evidence because the interface always generates Maps
+links and labels its details unverified. When Ask matches an existing place with
+no source URL, the same evidence rule applies before the server automatically
+adds the link and returns the updated authoritative place. If the search
+provides no credible exact match or the trip changes concurrently, Ask leaves
+the place unchanged.
 
 Each shared trip will be a versioned document in Upstash Redis. The share link
 will carry a high-entropy bearer token in its URL fragment, which browsers do not
@@ -197,6 +222,7 @@ live, stale, and unavailable data.
 | Make embedded Ask the primary conversational surface                          | Travelers retain trip context and review suggestions in one mobile flow; the model remains a read-only authenticated client until explicit confirmation.                                                   | Custom GPT Actions only, manual copy and paste.                                                                         |
 | Keep chat session-local                                                       | Conversation content is not shared trip state and is limited to the current browser tab, reducing storage and privacy risk.                                                                                | Server-side conversation history, durable browser history.                                                              |
 | Rank saved places in the existing structured model response                   | Natural-language requests can reuse saved summaries and normalized tags with one model request; authoritative IDs let the server and UI render current trip data without accepting model-generated copies. | Embeddings, vector search, deterministic keyword ranking, a second model request.                                       |
+| Treat explicit multi-place additions as a bounded batch                       | Travelers can paste natural prose without reformatting it, review saved and new places together, and confirm up to twelve additions atomically while ordinary discovery stays concise.                     | Requiring tables, splitting every list into groups of three, automatically saving model output.                         |
 | Return only search-grounded new-place suggestions when no saved place matches | Existing decisions remain primary and avoid unnecessary discovery calls; every new suggestion remains inspectable through a clickable source before and after saving.                                      | Always combining saved and new places, accepting unsourced suggestions, treating narrative URLs as evidence.            |
 | Automatically enrich a matched saved place that lacks a source URL            | A missing reference link is low-risk metadata that improves the saved card immediately. The server accepts only exact current-search evidence, never overwrites a link, and changes no other trip data.    | Requiring a separate confirmation for every link, background enrichment, allowing the model to mutate arbitrary fields. |
 | Use strict Structured Outputs for suggestions                                 | A validated transport shape prevents malformed model data from reaching mutation code, while narrative plan advice avoids a competing proposal schema.                                                     | Free-form extraction, model-created plan proposals.                                                                     |

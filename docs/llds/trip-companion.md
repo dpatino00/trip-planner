@@ -349,14 +349,31 @@ itinerary changes, and proposal application or dismissal. They retain the
 existing `{ baseVersion, mutationId, mutation }` envelope and atomic version
 checks. The transport-only `add-suggested-place` mutation carries a validated
 `SuggestedPlace`; the server normalizes it into the existing internal
-`add-place` mutation. A normalized name/locality duplicate is a successful no-op.
+`add-place` mutation. The transport-only `add-suggested-places` mutation carries
+one to twelve validated suggestions and performs the same conversion for all
+non-duplicates in one atomic write. A normalized name/locality duplicate is a
+successful no-op.
+
+```ts
+type SuggestedPlaceMutation =
+  | { type: "add-suggested-place"; suggestion: SuggestedPlace }
+  | { type: "add-suggested-places"; suggestions: SuggestedPlace[] };
+```
+
+The batch mutation reuses the existing trip response. The client compares the
+returned authoritative places with the submitted normalized name/locality keys
+to mark each card saved or already present; no parallel batch-result datastore
+or endpoint is introduced.
 
 ## Embedded Ask Contract
 
 `POST /api/trip/chat` authenticates `Authorization: Bearer <trip-token>` and
-accepts a trimmed 1–2,000 character `message` plus at most eight prior user or
-assistant text messages. Each history item is 1–2,000 characters and combined
-history is capped at 8,000 characters. Bodies above 16 KiB are rejected.
+uses `x-trip-chat-contract` to select request and response validation. Contract
+version three accepts a trimmed 1–8,000 character `message`; version two and
+headerless requests retain the 2,000-character limit. Every version accepts at
+most eight prior user or assistant text messages, each 1–2,000 characters, with
+combined history capped at 8,000 characters. Version-three bodies above 32 KiB
+and older bodies above 16 KiB are rejected.
 
 The client never submits a trip document. After authentication, the route loads
 the authoritative trip and constructs a compact context containing title,
@@ -385,7 +402,8 @@ interface SuggestedPlace {
 interface TripChatResponse {
   message: string;
   savedPlaceIds: string[];
-  suggestions: Array<SuggestedPlace & { sourceUrl: string }>;
+  suggestions: SuggestedPlace[];
+  unresolvedPlaceNames: string[];
   tripVersion: number;
 }
 
@@ -399,59 +417,51 @@ interface TripChatModelResponse {
   savedPlaceIds: string[];
   savedPlaceSources: SavedPlaceSourceCandidate[];
   suggestions: SuggestedPlace[];
+  unresolvedPlaceNames: string[];
 }
 ```
 
 All strict Structured Output properties are required; nullable properties
-represent optional concepts. The response message is at most 2,000 characters
-and both saved-place IDs and suggestions are capped at three. Saved-place IDs
-must be unique and ordered from most to least relevant. The route silently
-discards IDs that are duplicated, absent from the bounded context, or absent
-from the authoritative trip while preserving the model's ranking order. The
-model candidate may also return at most three unique
-`SavedPlaceSourceCandidate` values. The route accepts one only when its place ID
-is a valid returned saved match, the authoritative saved place currently has no
-source URL, and its URL exactly matches an HTTPS URL in the current response's
-bounded web-search evidence. Candidates for unknown, unreturned, or already
-sourced places are silently discarded.
+represent optional concepts. The narrative message remains capped at 2,000
+characters. Each result array is individually capped at twelve, and the combined
+count of valid saved IDs, suggestions, and unresolved names is at most twelve.
+The route preserves first-occurrence order within each group, silently removes
+duplicates, and excludes unresolved names that normalize to a resolved saved or
+suggested place. If the input identifies more than twelve places, the model
+accounts for the first twelve and states in `message` that the remaining entries
+were not processed.
 
-If at least one valid saved-place ID remains, the route returns those IDs and an
-empty suggestions array even when the model supplied suggestions. Otherwise it
-returns only new-place candidates whose non-null `sourceUrl` exactly matches an
-HTTPS URL in the current response's bounded web-search evidence. New-place and
-saved-place URLs from trip context, user input, conversation history, or model
-narrative do not count as search evidence. If no candidate has a verified
-source, the route returns no suggestion card or source enrichment rather than
-accepting an unsourced URL. Shared `SuggestedPlace` and `SavedPlace` schemas keep
-nullable `sourceUrl` for existing data and Action compatibility, while the
-embedded Ask response narrows every returned new suggestion to a non-null source
-URL. `tripVersion` is the authoritative version after any successful source
-enrichment and lets the client refresh stale trip state.
+Saved-place IDs must occur in both the bounded context and authoritative trip.
+Suggestions are unique by normalized name/locality and cannot duplicate an
+authoritative place. Source candidates are unique by saved-place ID and capped
+at twelve. The route accepts a saved-place source only when the ID is a valid
+returned match, the authoritative place still has no source URL, and the exact
+HTTPS URL occurs in the current response's bounded web-search evidence.
 
-The current browser sends `x-trip-chat-contract: 2`. The route includes
-`tripVersion` only for that contract; requests without the header receive the
-same validated response with the two original fields (`message` and
-`suggestions`). This rolling-compatibility rule prevents a strict older browser
-schema from rejecting additive fields while cached tabs age out. It does not
-change model generation, validation, authentication, or cache policy.
+The server separates explicit addition intent from saved-place lookup intent.
+An `add`, `save`, `include`, `keep`, or `import` request enables addition mode
+regardless of whether the names appear in prose, lines, bullets, or a table.
+Addition mode may return saved IDs and new suggestions together and accounts for
+up to twelve places. It preserves relevant user-supplied hours, prices, deals,
+and character as concise summary text without presenting those details as
+independently verified. An identifiable suggestion remains reviewable when no
+source is found; its `sourceUrl` becomes null and the UI supplies Maps links.
 
-For general discovery, the model suggests new places, excludes exact saved-place
-duplicates, and returns no saved IDs. It returns saved-place IDs only when the
-traveler explicitly asks about saved places, Ideas, the current trip, or adding
-named places. For an explicit saved-place request, it ranks useful matches by
-names, summaries, interests, and normalized tags. When every useful saved match
-already has a source URL, it returns only ranked `savedPlaceIds` and does not
-invoke web search. When a useful match lacks a source URL, it must use the one
-bulk web search to find references for all missing matched-place links together
-and returns the exact ID-to-URL associations as structured source candidates.
-For discovery, it must use that same single bulk search before returning up to
-three new suggestions. Each candidate identifies its own exact URL from that
-search in a structured field; placing a URL only in `message` is insufficient.
-The model does not claim that a source was persisted because persistence occurs
-after generation. Every returned new suggestion has a concise one- or two-
-sentence summary describing what the place is, why someone might visit, and the
-relevant character, cuisine, or experience; its tags use normalized lower-case
-search terms such as `mexican`, `seafood`, `casual`, or `outdoor`.
+Saved-place lookup without addition intent retains the existing behavior: up to
+three ranked authoritative matches suppress new suggestions. General discovery
+returns no saved IDs, excludes exact saved duplicates, and returns at most three
+new suggestions. Every general-discovery suggestion must carry a non-null HTTPS
+URL that exactly matches current web-search evidence; an unsourced or ungrounded
+candidate is discarded. URLs found only in context, input, history, or narrative
+never count as evidence. In addition mode, an ungrounded candidate URL is
+stripped while the otherwise valid suggestion is retained as Maps-only.
+
+The current browser sends `x-trip-chat-contract: 3`. It receives all five
+version-three fields. A version-two request receives its prior four-field shape,
+three-item caps, required suggestion sources, and saved-match suppression. A
+headerless request receives only `message` and up to three sourced suggestions.
+This rolling-compatibility rule prevents cached clients from rejecting additive
+fields while they age out.
 
 After validation, the chat handler applies all accepted saved-place source URLs
 in one repository compare-and-set operation. It starts from the latest complete
@@ -465,29 +475,31 @@ retry also conflicts, Ask still returns its validated narrative and saved matche
 with the latest known `tripVersion`, but reports no source as persisted.
 
 The injected `TripChatModel` production adapter uses the OpenAI Node SDK,
-`responses.parse()` with `zodTextFormat`, `store: false`, the configured
-`OPENAI_MODEL`, a 1,600-token output cap, and a 20-second timeout. It configures
-only low-context web search and allows at most one tool call for all suggestions
-in a response; no arbitrary HTTP or mutation tools are available. The model
-candidate schema remains tolerant of nullable source fields so the route can
-discard individual unsourced or ungrounded candidates without exposing partial
-invalid data. The public Ask response schema requires a source URL on every new
-suggestion. Invalid, incomplete, or refused model output returns `502`; timeout
-returns `504`; missing server configuration or an unavailable model/storage
-service returns `503`.
+`responses.parse()` with `zodTextFormat`, `store: false`, and the configured
+`OPENAI_MODEL`. Standard mode keeps the 1,600-token output cap, one low-context
+web-search call, and 20-second timeout. Addition mode uses a 5,000-token cap, at
+most four low-context web-search calls, and a 45-second timeout. Both modes use
+one model request and expose no arbitrary HTTP or mutation tools. Invalid,
+incomplete, or refused output returns `502`; timeout returns `504`; missing
+server configuration or unavailable model/storage returns `503`.
 
-The suggestion card renders each verified URL as `Learn more` before mutation.
-When the traveler explicitly chooses Add to trip, the existing versioned
-`add-suggested-place` mutation passes that URL through the shared place factory
-unchanged. Ideas then renders the same URL as `Visit source`; generation alone
-never adds a saved place. For saved matches, the chat handler's validated
-missing-link enrichment is the only generation-time trip mutation; generation
-never overwrites a source, schedules a place, or changes other saved fields.
+A suggestion card renders `Learn more` only for a verified source and always
+renders generated Apple Maps, Google Maps, and Directions links. Individual Add
+to trip retains `add-suggested-place`. Add all new sends one versioned
+`add-suggested-places` mutation containing 1–12 suggestions. The server
+normalizes them in order against the authoritative trip and earlier batch
+entries, skips exact name/locality duplicates, and writes all remaining places
+atomically with one version increment. An all-duplicate batch is a successful
+no-op. A malformed member rejects the mutation before any write. The existing
+mutation ID, one-conflict retry, and post-response-loss reconciliation rules
+apply to the whole batch. Neither individual nor bulk confirmation schedules a
+place.
 
-Chat is limited to ten requests per hashed trip/address pair per ten minutes and
-one hundred requests per hashed trip per UTC day. The daily allowance is the MVP
-budget control; a weighted token ledger is deferred. Successful and error
-responses are `no-store`.
+Chat is limited to twenty-five requests per hashed trip/address pair per ten
+minutes and two hundred fifty requests per hashed trip per UTC day. A batch
+counts as one request, including when later validation or generation fails. The
+daily allowance remains request-based; a weighted token ledger is deferred.
+Successful and error responses are `no-store`.
 
 ## Custom GPT Action Contracts
 
@@ -577,17 +589,22 @@ credentials in rate-limit keys.
 
 ### Ask about a trip
 
-The Ask tab keeps a version-2 maximum of twelve messages in `sessionStorage`
+The Ask tab keeps a version-3 maximum of twelve messages in `sessionStorage`
 under a SHA-256-derived trip key and sends only the most recent eight text
-messages. Each assistant message stores ranked saved-place IDs as well as new
-suggestions. Version-1 ephemeral chat data is discarded rather than migrated.
-The exact trip token is removed before persistence and is rejected if submitted
-to the server. Dismissing a suggestion is session-local and performs no
-mutation. Adding a suggestion uses conflict reconciliation, updates SWR and the
-IndexedDB snapshot, and adds only to Ideas—not the itinerary. Saved matches are
-read-only and never add, edit, remove, favorite, or schedule a place. Planning
-questions receive narrative guidance that points travelers to the existing Plan
-proposal workflow; embedded Ask never creates a `PlanProposal`.
+messages. User-message content may contain up to 8,000 characters; assistant
+narrative remains capped at 2,000. Each assistant message stores up to twelve
+combined ranked saved-place IDs, new suggestions, and unresolved names.
+Version-1 and version-2 ephemeral chat data is discarded rather than migrated,
+so stale three-item schemas cannot reject batch results. Card data is never sent
+back as model history. The exact trip token is removed before persistence and is
+rejected if submitted to the server.
+
+Dismissing a suggestion is session-local and performs no mutation. Individual
+and bulk addition use conflict reconciliation, update SWR and the IndexedDB
+snapshot, and add only to Ideas—not the itinerary. Saved matches are read-only
+and never add, edit, remove, favorite, or schedule a place. Planning questions
+receive narrative guidance that points travelers to the existing Plan proposal
+workflow; embedded Ask never creates a `PlanProposal`.
 
 ## Primary Behaviors
 
@@ -670,6 +687,15 @@ directions links before confirmation, plus a supplied source link when present.
 They retain explicit **Add to trip** and session-local **Dismiss** controls and
 expose saved, duplicate, or retry states.
 
+When an assistant response contains more than one new suggestion, Ask also shows
+**Add all new**. Activating it sends one atomic batch mutation and marks each
+card saved or already present from the returned authoritative trip. While the
+batch is pending, all affected add controls are disabled. A failure or repeated
+conflict retains every unsaved card for retry, and response-loss reconciliation
+refreshes the trip once before reporting failure. Unresolved names render after
+the cards in a compact **Needs clarification** list and expose no mutation
+control.
+
 Assistant narrative uses a small allowlisted text formatter rather than raw
 HTML. It preserves paragraphs, recognizes simple numbered or bulleted lines,
 and turns only HTTPS Markdown links into safe outbound links. All other model
@@ -729,8 +755,9 @@ writes and chat generation are not queued. Session-local chat remains readable.
 - Chat logs contain only event name, request ID, configured model, hashed trip
   identifier, duration, status, and returned token usage—never conversation
   content, raw addresses, tokens, or secrets.
-- Chat bodies are limited to 16 KiB, reject the exact trip token in content, and
-  render all returned content as text.
+- Version-three chat bodies are limited to 32 KiB; older contracts remain at 16
+  KiB. Every contract rejects the exact trip token in content and never renders
+  returned content as raw HTML.
 - Action and browser bodies are limited to 64 KiB and reject unknown fields.
 - GPT-supplied text renders only as text. Rich HTML is not accepted.
 - Optional source URLs are parsed, restricted to HTTPS, and opened only after a
@@ -766,8 +793,13 @@ writes and chat generation are not queued. Session-local chat remains readable.
 | Browser offline during mutation                   | Roll back optimistic state, retain the draft, and disable further writes.                 |
 | Missing chat configuration                        | Return retryable `503 configuration-unavailable` without configuration values.            |
 | Chat allowance exhausted                          | Return retryable `429 rate-limited`.                                                      |
-| Model timeout                                     | Return retryable `504 model-timeout` after 20 seconds.                                    |
+| Standard model timeout                            | Return retryable `504 model-timeout` after 20 seconds.                                    |
+| Addition-mode model timeout                       | Return retryable `504 model-timeout` after 45 seconds.                                    |
 | Invalid, incomplete, or refused AI output         | Return retryable `502 model-invalid-response`; do not expose partial suggestions.         |
+| More than twelve identifiable addition entries    | Process the first twelve and state that remaining entries were not processed.             |
+| Addition entry cannot be identified               | Return its bounded name under Needs clarification without a mutation control.             |
+| Addition suggestion has no verified source        | Retain a details-unverified card with Maps links and no Learn more action.                |
+| Bulk addition contains malformed suggestion data  | Return non-retryable `400 invalid-mutation`; perform no write.                            |
 | Saved-place source has no current search evidence | Discard it and leave the saved place unchanged.                                           |
 | Saved place already has a source URL              | Preserve the existing URL and discard the enrichment candidate.                           |
 | Source enrichment conflicts twice                 | Return Ask results using the latest known trip version without claiming a link was saved. |
@@ -811,16 +843,17 @@ Custom GPT Action test interface and representative prompts.
 
 ## Design Decisions
 
-| Decision                                                            | Rationale                                                                                               | Alternatives                                                 |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Embed custom places in each trip document                           | A trip becomes destination-neutral and self-contained; old links can migrate deterministically.         | Global hardcoded catalog IDs, separate place database.       |
-| Bind the private GPT to one server-configured trip token            | The model never receives the browser credential and the initial integration remains simple and private. | Dynamic trip token arguments, OAuth, token in URLs.          |
-| Share mutation and repository code across browser and Action routes | Validation, concurrency, and persistence behavior cannot drift between clients.                         | Separate GPT datastore or bespoke write path.                |
-| Keep Action operations explicit                                     | Clear operation names and schemas help ChatGPT choose correctly and constrain mutations.                | One generic mutation endpoint.                               |
-| Discard invalid optional enrichment with warnings                   | A bad link should not block saving the place the user requested.                                        | Reject the whole place, accept unsafe URLs.                  |
-| Always derive Maps links                                            | Every custom place remains actionable without trusting a supplied website or requiring a place API.     | Require an official site, use a paid place-search provider.  |
-| Make optimization synchronous and proposal-based                    | It provides immediate help with no worker infrastructure and protects confirmed choices.                | Background queue, periodic agent, silent itinerary rewrites. |
-| Omit required image data                                            | Arbitrary places render consistently without repetitive, licensed, or stale imagery.                    | Mandatory local or generated images.                         |
+| Decision                                                            | Rationale                                                                                                 | Alternatives                                                 |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Embed custom places in each trip document                           | A trip becomes destination-neutral and self-contained; old links can migrate deterministically.           | Global hardcoded catalog IDs, separate place database.       |
+| Bind the private GPT to one server-configured trip token            | The model never receives the browser credential and the initial integration remains simple and private.   | Dynamic trip token arguments, OAuth, token in URLs.          |
+| Share mutation and repository code across browser and Action routes | Validation, concurrency, and persistence behavior cannot drift between clients.                           | Separate GPT datastore or bespoke write path.                |
+| Keep Action operations explicit                                     | Clear operation names and schemas help ChatGPT choose correctly and constrain mutations.                  | One generic mutation endpoint.                               |
+| Use one atomic mutation for Add all new                             | A reviewed batch persists as one versioned change or remains retryable, while duplicates are safe no-ops. | Sequential card mutations with partial completion.           |
+| Discard invalid optional enrichment with warnings                   | A bad link should not block saving the place the user requested.                                          | Reject the whole place, accept unsafe URLs.                  |
+| Always derive Maps links                                            | Every custom place remains actionable without trusting a supplied website or requiring a place API.       | Require an official site, use a paid place-search provider.  |
+| Make optimization synchronous and proposal-based                    | It provides immediate help with no worker infrastructure and protects confirmed choices.                  | Background queue, periodic agent, silent itinerary rewrites. |
+| Omit required image data                                            | Arbitrary places render consistently without repetitive, licensed, or stale imagery.                      | Mandatory local or generated images.                         |
 
 ## Open Questions
 

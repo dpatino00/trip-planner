@@ -274,6 +274,12 @@ const mutation = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
+      type: z.literal("add-suggested-places"),
+      suggestions: z.array(suggestedPlaceSchema).min(1).max(12),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("update-place"),
       placeId: z.string().min(1),
       changes: placeChanges,
@@ -331,7 +337,7 @@ const mutation = z.discriminatedUnion("type", [
     .strict(),
 ]);
 
-// @spec TRIP-API-007, TRIP-DATA-007
+// @spec TRIP-API-007, TRIP-DATA-007, CHAT-BE-025
 export const tripMutationRequestSchema = z
   .object({
     baseVersion: z.number().int().positive(),

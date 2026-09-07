@@ -786,6 +786,18 @@ fieldset {
   gap: 0.7rem;
   margin-top: 0.9rem;
 }
+.add-all-suggestions {
+  justify-self: start;
+}
+.unresolved-place-list {
+  margin-top: 0.9rem;
+  border-left: 3px solid var(--coral);
+  padding-left: 0.8rem;
+}
+.unresolved-place-list ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
 .saved-match-list {
   display: grid;
   gap: 0.7rem;

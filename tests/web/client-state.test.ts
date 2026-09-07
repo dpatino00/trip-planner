@@ -58,6 +58,53 @@ it("stops after a second conflict and preserves the draft", async () => {
   expect(result).toMatchObject({ status: "conflict", draft });
 });
 
+// @spec CHAT-BE-027
+it("retries a complete bulk suggestion mutation once with the same mutation identifier", async () => {
+  const latest = makeTripV2({ version: 2, title: "Changed elsewhere" });
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({ status: 409, trip: latest })
+    .mockResolvedValueOnce({
+      status: 200,
+      trip: makeTripV2({ version: 3, title: "Changed elsewhere" }),
+    });
+  const mutationId = "90cb919a-cf40-49be-8f0c-cf0556bd8bf7";
+  const mutation = {
+    type: "add-suggested-places",
+    suggestions: [
+      {
+        name: "La Puerta",
+        summary: "A lively Gaslamp Mexican restaurant for a downtown meal.",
+        locality: "Gaslamp",
+        interests: ["food"],
+        tags: ["mexican", "casual"],
+        profile: "indoor",
+        preferredDayparts: ["evening"],
+        durationMinutes: 90,
+        costLevel: 2,
+        reservationRecommended: false,
+        sourceUrl: null,
+      },
+    ],
+  } as never;
+
+  await mutateTripWithRetry({
+    trip: makeTripV2(),
+    mutationId,
+    mutation,
+    request,
+    draft: mutation,
+  });
+
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls[0][0]).toMatchObject({ mutationId, mutation });
+  expect(request.mock.calls[1][0]).toMatchObject({
+    baseVersion: 2,
+    mutationId,
+    mutation,
+  });
+});
+
 // @spec PWA-DATA-001, SEC-DATA-001
 it("stores a versioned trip snapshot under a hash-derived key without the token", async () => {
   await saveTripSnapshot(SHARE_TOKEN, makeTripV2());

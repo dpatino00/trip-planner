@@ -15,6 +15,7 @@ it("uses strict Responses parsing with one bounded web search", async () => {
       savedPlaceIds: [],
       savedPlaceSources: [],
       suggestions: [],
+      unresolvedPlaceNames: [],
     },
     output: [
       {
@@ -88,10 +89,93 @@ it("uses strict Responses parsing with one bounded web search", async () => {
       savedPlaceIds: [],
       savedPlaceSources: [],
       suggestions: [],
+      unresolvedPlaceNames: [],
     },
     sources: [sourceUrl],
     usage: { inputTokens: 42, outputTokens: 12, totalTokens: 54 },
   });
+});
+
+// @spec CHAT-DATA-006, CHAT-BE-001, CHAT-BE-021, CHAT-BE-022, CHAT-BE-023, CHAT-BE-024, SEC-API-007
+it("uses the larger bounded model budget for free-form addition batches", async () => {
+  const parse = vi.fn().mockResolvedValue({
+    status: "completed",
+    output_parsed: {
+      message: "Review these additions.",
+      savedPlaceIds: [],
+      savedPlaceSources: [],
+      suggestions: [],
+      unresolvedPlaceNames: ["A venue needing clarification"],
+    },
+    output: [],
+  });
+  const model = createOpenAITripChatModel({
+    client: { responses: { parse } },
+    model: "gpt-test",
+  });
+
+  await model.generate({
+    message:
+      "Please import La Puerta — Gaslamp, Ironside Fish & Oyster — Little Italy, and ten more places from my notes.",
+    history: [],
+    context: {
+      title: makeTripV2().title,
+      destination: makeTripV2().destination,
+      dates: { start: makeTripV2().startDate, end: makeTripV2().endDate },
+      preferences: makeTripV2().preferences,
+      places: [],
+      itinerary: [],
+      pendingProposal: null,
+    },
+  });
+
+  expect(parse).toHaveBeenCalledWith(
+    expect.objectContaining({
+      store: false,
+      max_output_tokens: 5000,
+      max_tool_calls: 4,
+      tools: [{ type: "web_search", search_context_size: "low" }],
+    }),
+    expect.anything(),
+  );
+  const request = JSON.stringify(parse.mock.calls[0][0]);
+  expect(request).toMatch(/prose.*list.*table/i);
+  expect(request).toMatch(/twelve|12/);
+  expect(request).toMatch(/hours.*prices.*deals|prices.*deals.*hours/i);
+  expect(request).toMatch(/unresolvedPlaceNames/);
+  expect(request).toMatch(
+    /savedPlaceIds.*suggestions|suggestions.*savedPlaceIds/i,
+  );
+});
+
+// @spec CHAT-BE-021
+it("does not treat ordinary save or keep language as a place-addition batch", async () => {
+  const parse = vi.fn().mockResolvedValue({
+    status: "completed",
+    output_parsed: {
+      message: "A concise answer",
+      savedPlaceIds: [],
+      savedPlaceSources: [],
+      suggestions: [],
+      unresolvedPlaceNames: [],
+    },
+    output: [],
+  });
+  const model = createOpenAITripChatModel({
+    client: { responses: { parse } },
+    model: "gpt-test",
+  });
+
+  await model.generate({
+    message: "How can we save money and keep afternoons flexible?",
+    history: [],
+    context: {} as never,
+  });
+
+  expect(parse).toHaveBeenCalledWith(
+    expect.objectContaining({ max_output_tokens: 1600, max_tool_calls: 1 }),
+    expect.anything(),
+  );
 });
 
 it("rejects incomplete or refused responses", async () => {
