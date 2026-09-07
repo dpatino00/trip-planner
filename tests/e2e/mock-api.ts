@@ -45,11 +45,32 @@ export async function mockTripApi(
   );
   await page.route("**/api/trip/chat", (route) => {
     const request = route.request().postDataJSON() as { message?: string };
+    if (/torrey pines/i.test(request.message ?? "")) {
+      const current = backend.getTrip();
+      const sourceUrl = "https://www.parks.ca.gov/torreypines";
+      const trip = {
+        ...current,
+        version: current.version + 1,
+        places: current.places.map((place: SavedPlace) =>
+          place.id === "place-torrey-pines" && !place.sourceUrl
+            ? { ...place, sourceUrl }
+            : place,
+        ),
+      };
+      backend.setTrip(trip);
+      return json(route, {
+        message: "Torrey Pines is already in your Ideas.",
+        savedPlaceIds: ["place-torrey-pines"],
+        suggestions: [],
+        tripVersion: trip.version,
+      });
+    }
     if (/mexican/i.test(request.message ?? "")) {
       return json(route, {
         message: "You already saved a Mexican seafood favorite.",
         savedPlaceIds: ["place-tacos"],
         suggestions: [],
+        tripVersion: backend.getTrip().version,
       });
     }
     return json(route, {
@@ -70,6 +91,7 @@ export async function mockTripApi(
           sourceUrl: "https://www.sandiego.gov/lifeguards/beaches/cove",
         },
       ],
+      tripVersion: backend.getTrip().version,
     });
   });
   await page.route("**/api/trip", async (route) => {

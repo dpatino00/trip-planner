@@ -30,11 +30,12 @@ afterEach(cleanup);
 
 // @spec CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-007
 it("submits with Enter, renders suggestions, dismisses locally, and confirms explicitly", async () => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
     Response.json({
       message: "Try this coastal stop.",
       savedPlaceIds: [],
       suggestions: [suggestion],
+      tripVersion: 1,
     }),
   );
   const onAddSuggestion = vi.fn().mockResolvedValue({ status: "saved" });
@@ -56,6 +57,12 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
   fireEvent.keyDown(composer, { key: "Enter" });
 
   expect(await screen.findByText("Try this coastal stop.")).toBeVisible();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/trip/chat",
+    expect.objectContaining({
+      headers: expect.objectContaining({ "x-trip-chat-contract": "2" }),
+    }),
+  );
   expect(screen.getByText("La Jolla Cove")).toBeVisible();
   expect(screen.getByRole("link", { name: "Apple Maps" })).toHaveAttribute(
     "href",
@@ -125,6 +132,7 @@ it("retains a suggestion after repeated conflicts so it can be retried", async (
       message: "Try this coastal stop.",
       savedPlaceIds: [],
       suggestions: [suggestion],
+      tripVersion: 1,
     }),
   );
   const onAddSuggestion = vi.fn().mockResolvedValue({ status: "conflict" });
@@ -158,6 +166,7 @@ it("renders authoritative saved matches in rank order with read-only actions", a
       message: "You already saved these Mexican-food options.",
       savedPlaceIds: ["place-tacos", "place-balboa-park"],
       suggestions: [],
+      tripVersion: 1,
     }),
   );
   const onAddSuggestion = vi.fn();

@@ -1,11 +1,22 @@
-// @spec PWA-UI-006
+// @spec PWA-UI-006, PWA-PROC-007
 export async function registerServiceWorker(isFormDirty: () => boolean) {
   if (!("serviceWorker" in navigator)) return;
-  const workerPath =
-    process.env.NODE_ENV === "production" ? "/sw-prod.js" : "/sw.js";
+
+  if (process.env.NODE_ENV !== "production") {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    const controlledByStaleWorker = navigator.serviceWorker.controller !== null;
+    await Promise.allSettled(
+      registrations.map((registration) => registration.unregister()),
+    );
+    if (controlledByStaleWorker && registrations.length > 0) {
+      window.location.reload();
+    }
+    return;
+  }
+
   const registration =
     (await navigator.serviceWorker.getRegistration()) ??
-    (await navigator.serviceWorker.register(workerPath));
+    (await navigator.serviceWorker.register("/sw-prod.js"));
   await navigator.serviceWorker.ready;
   if (!navigator.serviceWorker.controller) {
     await new Promise<void>((resolve) => {
@@ -26,9 +37,7 @@ export async function registerServiceWorker(isFormDirty: () => boolean) {
   const pagePath = `${location.pathname}${location.search}`;
   const pageResponse = await fetch(pagePath);
   if (pageResponse.ok) {
-    const pageCache = await caches.open(
-      process.env.NODE_ENV === "production" ? "public-v1" : "trip-public-v1",
-    );
+    const pageCache = await caches.open("public-v1");
     await pageCache.put(pagePath, pageResponse.clone());
   }
   const resources = performance

@@ -50,7 +50,7 @@ function request(body: unknown) {
   });
 }
 
-// @spec CHAT-BE-004, CHAT-BE-005
+// @spec CHAT-BE-004, CHAT-BE-005, CHAT-BE-014
 it("adds a confirmed suggestion to Ideas only and treats duplicates as no-ops", async () => {
   const { handlers, trip } = await setup();
   const mutationId = "90cb919a-cf40-49be-8f0c-cf0556bd8bf7";

@@ -8,7 +8,8 @@ import {
 } from "@/lib/chat/schema";
 import { migrateTripDocument } from "@/lib/trips/migrate";
 import type { RateLimiter } from "@/lib/trips/rate-limit";
-import type { TripRepository } from "@/lib/trips/repository-memory";
+import type { StoredTrip, TripRepository } from "@/lib/trips/repository-memory";
+import type { TripDocument } from "@/lib/types";
 import {
   hashPrivateKey,
   isValidShareToken,
@@ -80,6 +81,65 @@ function safeModelNameForLog(modelName: string) {
   return modelName.startsWith("sk-") ? "invalid-model-config" : modelName;
 }
 
+interface SavedPlaceSourceCandidate {
+  savedPlaceId: string;
+  sourceUrl: string;
+}
+
+// @spec CHAT-BE-002, CHAT-BE-016, CHAT-BE-017, CHAT-BE-018, CHAT-BE-019
+async function enrichSavedPlaceSources(options: {
+  repository: TripRepository;
+  key: string;
+  stored: StoredTrip;
+  candidates: SavedPlaceSourceCandidate[];
+  clock: () => Date;
+}): Promise<TripDocument> {
+  let currentStored = options.stored;
+  let current = migrateTripDocument(currentStored.trip);
+  const sources = new Map(
+    options.candidates.map((candidate) => [
+      candidate.savedPlaceId,
+      candidate.sourceUrl,
+    ]),
+  );
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const timestamp = options.clock().toISOString();
+    let changedCount = 0;
+    const places = current.places.map((place) => {
+      const sourceUrl = sources.get(place.id);
+      if (!sourceUrl || place.sourceUrl !== null) return place;
+      changedCount += 1;
+      return { ...place, sourceUrl, updatedAt: timestamp };
+    });
+    if (changedCount === 0) return current;
+
+    const changed: TripDocument = {
+      ...current,
+      places,
+      version: current.version + 1,
+      updatedAt: timestamp,
+    };
+    const updated = await options.repository.update(
+      options.key,
+      current.version,
+      {
+        trip: changed,
+        recentMutationIds: currentStored.recentMutationIds,
+      },
+    );
+    if (updated.ok)
+      return updated.latest
+        ? migrateTripDocument(updated.latest.trip)
+        : changed;
+    if (!updated.latest) return current;
+    currentStored = updated.latest;
+    current = migrateTripDocument(currentStored.trip);
+  }
+
+  return current;
+}
+
 async function readBody(request: Request) {
   const raw = await request.text();
   if (new TextEncoder().encode(raw).length > 16 * 1024)
@@ -112,7 +172,7 @@ async function withTimeout<T>(
   }
 }
 
-// @spec CHAT-API-001, CHAT-API-002, CHAT-API-003, CHAT-API-004, CHAT-API-005, CHAT-API-006, CHAT-API-007, CHAT-API-008, CHAT-API-009, CHAT-API-010, CHAT-BE-002, CHAT-BE-008, CHAT-BE-011
+// @spec CHAT-API-001, CHAT-API-002, CHAT-API-003, CHAT-API-004, CHAT-API-005, CHAT-API-006, CHAT-API-007, CHAT-API-008, CHAT-API-009, CHAT-API-010, CHAT-API-011, CHAT-API-012, CHAT-BE-002, CHAT-BE-008, CHAT-BE-011, CHAT-BE-013, CHAT-BE-015
 export function createTripChatHandler({
   repository,
   rateLimiter,
@@ -123,6 +183,7 @@ export function createTripChatHandler({
   logger = (event) => console.info(event),
 }: Dependencies) {
   return async function POST(request: Request) {
+    const currentContract = request.headers.get("x-trip-chat-contract") === "2";
     const token = tokenFrom(request);
     if (!token)
       return error("unauthorized", "A valid bearer token is required", 401);
@@ -208,6 +269,7 @@ export function createTripChatHandler({
     let upstreamCode: string | undefined;
     let usage: TripChatUsage | undefined;
     try {
+      const tripKey = tripKeyForToken(token);
       const trip = migrateTripDocument(stored.trip);
       const context = buildTripChatContext(trip);
       const generated = await withTimeout(
@@ -234,29 +296,58 @@ export function createTripChatHandler({
           boundedIds.has(id) &&
           authoritativeIds.has(id),
       );
-      const permittedUrls = suppliedHttpsUrls([
-        JSON.stringify(context),
-        parsed.data.message,
-        ...parsed.data.history.map((item) => item.content),
-        ...(generated.sources ?? []),
-      ]);
+      const searchedUrls = suppliedHttpsUrls(generated.sources ?? []);
+      const savedIdSet = new Set(savedPlaceIds);
+      const sourceCandidates = output.data.savedPlaceSources.filter(
+        (candidate) => {
+          if (!savedIdSet.has(candidate.savedPlaceId)) return false;
+          const place = trip.places.find(
+            (item) => item.id === candidate.savedPlaceId,
+          );
+          return (
+            place?.sourceUrl === null && searchedUrls.has(candidate.sourceUrl)
+          );
+        },
+      );
+      const responseTrip = sourceCandidates.length
+        ? await enrichSavedPlaceSources({
+            repository,
+            key: tripKey,
+            stored,
+            candidates: sourceCandidates,
+            clock,
+          })
+        : trip;
+      const responsePlaceIds = new Set(
+        responseTrip.places.map((place) => place.id),
+      );
+      const finalSavedPlaceIds = savedPlaceIds.filter((id) =>
+        responsePlaceIds.has(id),
+      );
       const response = tripChatResponseSchema.safeParse({
         message: output.data.message,
-        savedPlaceIds,
+        savedPlaceIds: finalSavedPlaceIds,
         suggestions:
-          savedPlaceIds.length > 0
+          finalSavedPlaceIds.length > 0
             ? []
-            : output.data.suggestions.map((suggestion) => ({
-                ...suggestion,
-                sourceUrl:
-                  suggestion.sourceUrl &&
-                  permittedUrls.has(suggestion.sourceUrl)
-                    ? suggestion.sourceUrl
-                    : null,
-              })),
+            : output.data.suggestions.filter(
+                (
+                  suggestion,
+                ): suggestion is typeof suggestion & { sourceUrl: string } =>
+                  suggestion.sourceUrl !== null &&
+                  searchedUrls.has(suggestion.sourceUrl),
+              ),
+        tripVersion: responseTrip.version,
       });
       if (!response.success)
         throw new TripChatInvalidOutputError("Invalid normalized model output");
+      if (!currentContract) {
+        const legacyResponse = {
+          message: response.data.message,
+          suggestions: response.data.suggestions,
+        };
+        return result(legacyResponse);
+      }
       return result(response.data);
     } catch (cause) {
       if (cause && typeof cause === "object") {

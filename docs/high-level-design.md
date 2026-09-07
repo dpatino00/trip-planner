@@ -15,7 +15,10 @@ emerge naturally in conversation.
 The Trip Companion will be a mobile-first shared trip website with an embedded
 Ask experience. Travelers can ask for contextual advice and receive relevant
 saved places before reviewable new-place suggestions without leaving the trip.
-Only an explicit Add to trip action mutates the shared plan, which remains the
+Only an explicit Add to trip action adds a new place to the shared plan. The
+single narrow exception is source-link enrichment: when Ask returns a saved
+place whose source URL is missing, it automatically attaches an exact HTTPS
+reference found in its current bounded web search. The shared trip remains the
 visual and durable source of truth. A private Custom GPT may continue to use
 authenticated Actions as an optional secondary client.
 
@@ -28,6 +31,9 @@ authenticated Actions as an optional secondary client.
   discover relevant saved places before receiving reviewable new-place
   suggestions.
 - Require explicit confirmation before an AI suggestion changes shared state.
+- Automatically add a search-grounded reference link to a matched saved place
+  when that place has no source URL, without overwriting existing links or
+  changing any other place or itinerary field.
 - Preserve authenticated Custom GPT Actions as an optional secondary client.
 - Turn conversational requests into structured place ideas, preferences,
   constraints, and itinerary proposals without requiring repeated form entry.
@@ -54,7 +60,8 @@ authenticated Actions as an optional secondary client.
 - Adding embeddings, a vector database, background place enrichment, a separate
   search provider, or a second Ask endpoint for saved-place discovery.
 - Allowing the embedded model to use tools other than one bounded web search for
-  place-reference links, or to directly mutate a trip.
+  place-reference links, or to directly mutate trip data beyond the server's
+  narrowly validated addition of a previously missing saved-place source URL.
 - Allowing the GPT to edit application code, deploy the website, make bookings,
   purchase anything, or delete a trip.
 - Letting automated optimization silently overwrite confirmed itinerary choices.
@@ -118,13 +125,29 @@ The Next.js App Router application will serve the interface, destination-neutral
 place data, same-origin trip and chat endpoints, and a small public Action API.
 The chat endpoint authenticates the share token, loads an authoritative compact
 trip context containing saved-place IDs and descriptions, and asks the OpenAI
-Responses API for narrative advice plus up to three ranked saved-place IDs. When
-the model finds no useful saved match, it may instead return up to three
-structured new-place suggestions and use one bounded web-search call to find
-HTTPS reference links for them. The server validates every returned ID against
-the authoritative bounded trip context, and no mutation tools are configured.
-The browser sends an explicit, versioned trip mutation only after a traveler
-chooses Add to trip for a new suggestion.
+Responses API for narrative advice plus up to three ranked saved-place IDs. A
+saved match with no source URL causes the same request to use its one bounded
+web-search call to find an exact HTTPS reference. When the model finds no useful
+saved match, it may instead return up to three structured new-place suggestions
+after using that bounded search. Every returned new-place suggestion includes an
+exact HTTPS reference URL from that search so the traveler can inspect the
+source before saving; candidates without credible search evidence are omitted
+rather than rendered as unsourced cards.
+
+The server validates every returned ID and source against the authoritative trip
+and the current response's search evidence. For a matched saved place with a
+missing source URL, the server may persist that validated URL automatically with
+an atomic, conflict-safe trip update; it never overwrites an existing source URL
+and never changes other place or itinerary fields. The model receives no
+mutation tool. The browser still sends an explicit, versioned trip mutation only
+after a traveler chooses Add to trip for a new suggestion, preserving the
+validated source URL.
+
+Embedded Ask requests advertise the browser response-contract version. This
+keeps rolling deployments compatible with an older cached browser bundle: a
+legacy request receives the original response fields, while a current request
+also receives saved-place matches and the authoritative trip version needed to
+refresh automatic source enrichment.
 
 The Action API will require a dedicated, revocable integration key configured as
 the Custom GPT Action's API-key credential. This key is distinct from an OpenAI
@@ -140,11 +163,16 @@ request path. The optimizer will preserve confirmed itinerary items and store
 explainable proposals for review. A queue or continuously running agent is not
 required for the initial release.
 
-Conversational place data may contain a source URL supplied by ChatGPT. The server
-will validate that it is a safe HTTP(S) URL but will not claim that an arbitrary
-URL is authoritative. The interface will always be able to generate an external
-Maps search link from the place name and locality, so missing imagery or an
-official website never blocks a useful card.
+Existing conversational place data may omit a source URL. New-place suggestions
+from embedded Ask, however, are returned only with an exact HTTPS URL present in
+the current bounded web-search evidence; a URL appearing only in model narrative
+is not sufficient. The interface exposes that URL for review before saving and
+preserves it on the saved place. When Ask matches an existing place with no
+source URL, the same evidence rule applies before the server automatically adds
+the link and returns the updated authoritative place. If the search provides no
+credible exact match or the trip changes concurrently, Ask leaves the place
+unchanged. It can also generate external Maps search links from the place name
+and locality, so missing imagery never blocks a useful card.
 
 Each shared trip will be a versioned document in Upstash Redis. The share link
 will carry a high-entropy bearer token in its URL fragment, which browsers do not
@@ -160,25 +188,26 @@ live, stale, and unavailable data.
 
 ## Key Design Decisions
 
-| Decision | Rationale | Alternatives considered |
-| --- | --- | --- |
-| Make the website the trip source of truth and ChatGPT a client | The plan stays durable, inspectable, and usable even when ChatGPT is closed; conversation becomes a convenient control surface instead of a second datastore. | Storing the plan only in GPT conversation history, letting GPT edit website files. |
-| Support custom places from conversation | Travelers can plan any destination without waiting for a hardcoded catalog. Structured fields keep GPT output testable. | One destination-specific catalog, a mandatory paid place-search API. |
-| Make embedded Ask the primary conversational surface | Travelers retain trip context and review suggestions in one mobile flow; the model remains a read-only authenticated client until explicit confirmation. | Custom GPT Actions only, manual copy and paste. |
-| Keep chat session-local | Conversation content is not shared trip state and is limited to the current browser tab, reducing storage and privacy risk. | Server-side conversation history, durable browser history. |
-| Rank saved places in the existing structured model response | Natural-language requests can reuse saved summaries and normalized tags with one model request; authoritative IDs let the server and UI render current trip data without accepting model-generated copies. | Embeddings, vector search, deterministic keyword ranking, a second model request. |
-| Fall back to bounded web search only when no saved place matches | Existing decisions remain primary and avoid unnecessary discovery calls; new sourced suggestions remain available when the trip has no useful match. | Always combining saved and new places, always invoking web search. |
-| Use strict Structured Outputs for suggestions | A validated transport shape prevents malformed model data from reaching mutation code, while narrative plan advice avoids a competing proposal schema. | Free-form extraction, model-created plan proposals. |
-| Use a dedicated Action API key for the private MVP | It is the smallest supported authentication model for an owner-operated GPT and remains separate from OpenAI and trip-sharing credentials. | No Action authentication, OAuth in the first release. |
-| Keep optimization deterministic and proposal-based | Results remain explainable and testable; confirmed plans are not silently rearranged. | An autonomous AI worker that directly rewrites the itinerary. |
-| Use Next.js, React, and TypeScript on Vercel | This provides a strong mobile UI foundation, integrated server endpoints, PWA support, and a first-class Vercel deployment path. | FastAPI with templates, separate React and Python applications. |
-| Keep Pixi as the repository command entrypoint | Contributors retain one documented workflow for development, tests, builds, and deployment while Vercel uses its supported npm installation pipeline. | Requiring direct npm and Vercel commands, attempting to use Pixi as Vercel's package manager. |
-| Use a free Upstash Redis integration | A small versioned JSON document fits key-value storage and enables immediate shared reads and writes with minimal operations. | Browser-only state, URL-encoded state, Vercel Blob, Postgres. |
-| Treat one opaque link as the trip credential | A trusted group can collaborate without account or invitation complexity. Keeping the token in the URL fragment reduces accidental disclosure through paths and referrers. | User accounts, separate viewer/editor links, public trip IDs. |
-| Support cached, read-only offline access | Travelers retain essential reference information without introducing ambiguous or conflicting offline writes. | Online-only use, queued offline mutations with background merge. |
-| Link out to Apple Maps and Google Maps | External navigation is more reliable and avoids map-tile providers, API keys, and a larger client bundle. | Embedded MapLibre, Google Maps SDK. |
-| Make place imagery optional | Link-rich text cards work for arbitrary destinations, avoid repetitive imagery, and remove an unnecessary asset pipeline. | Mandatory hosted images, remote hotlinking, generated images for every place. |
-| Deploy previews before production | Preview validation reduces deployment risk; production remains an explicit approval step. | Immediate production deployment. |
+| Decision                                                                      | Rationale                                                                                                                                                                                                  | Alternatives considered                                                                                                 |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Make the website the trip source of truth and ChatGPT a client                | The plan stays durable, inspectable, and usable even when ChatGPT is closed; conversation becomes a convenient control surface instead of a second datastore.                                              | Storing the plan only in GPT conversation history, letting GPT edit website files.                                      |
+| Support custom places from conversation                                       | Travelers can plan any destination without waiting for a hardcoded catalog. Structured fields keep GPT output testable.                                                                                    | One destination-specific catalog, a mandatory paid place-search API.                                                    |
+| Make embedded Ask the primary conversational surface                          | Travelers retain trip context and review suggestions in one mobile flow; the model remains a read-only authenticated client until explicit confirmation.                                                   | Custom GPT Actions only, manual copy and paste.                                                                         |
+| Keep chat session-local                                                       | Conversation content is not shared trip state and is limited to the current browser tab, reducing storage and privacy risk.                                                                                | Server-side conversation history, durable browser history.                                                              |
+| Rank saved places in the existing structured model response                   | Natural-language requests can reuse saved summaries and normalized tags with one model request; authoritative IDs let the server and UI render current trip data without accepting model-generated copies. | Embeddings, vector search, deterministic keyword ranking, a second model request.                                       |
+| Return only search-grounded new-place suggestions when no saved place matches | Existing decisions remain primary and avoid unnecessary discovery calls; every new suggestion remains inspectable through a clickable source before and after saving.                                      | Always combining saved and new places, accepting unsourced suggestions, treating narrative URLs as evidence.            |
+| Automatically enrich a matched saved place that lacks a source URL            | A missing reference link is low-risk metadata that improves the saved card immediately. The server accepts only exact current-search evidence, never overwrites a link, and changes no other trip data.    | Requiring a separate confirmation for every link, background enrichment, allowing the model to mutate arbitrary fields. |
+| Use strict Structured Outputs for suggestions                                 | A validated transport shape prevents malformed model data from reaching mutation code, while narrative plan advice avoids a competing proposal schema.                                                     | Free-form extraction, model-created plan proposals.                                                                     |
+| Use a dedicated Action API key for the private MVP                            | It is the smallest supported authentication model for an owner-operated GPT and remains separate from OpenAI and trip-sharing credentials.                                                                 | No Action authentication, OAuth in the first release.                                                                   |
+| Keep optimization deterministic and proposal-based                            | Results remain explainable and testable; confirmed plans are not silently rearranged.                                                                                                                      | An autonomous AI worker that directly rewrites the itinerary.                                                           |
+| Use Next.js, React, and TypeScript on Vercel                                  | This provides a strong mobile UI foundation, integrated server endpoints, PWA support, and a first-class Vercel deployment path.                                                                           | FastAPI with templates, separate React and Python applications.                                                         |
+| Keep Pixi as the repository command entrypoint                                | Contributors retain one documented workflow for development, tests, builds, and deployment while Vercel uses its supported npm installation pipeline.                                                      | Requiring direct npm and Vercel commands, attempting to use Pixi as Vercel's package manager.                           |
+| Use a free Upstash Redis integration                                          | A small versioned JSON document fits key-value storage and enables immediate shared reads and writes with minimal operations.                                                                              | Browser-only state, URL-encoded state, Vercel Blob, Postgres.                                                           |
+| Treat one opaque link as the trip credential                                  | A trusted group can collaborate without account or invitation complexity. Keeping the token in the URL fragment reduces accidental disclosure through paths and referrers.                                 | User accounts, separate viewer/editor links, public trip IDs.                                                           |
+| Support cached, read-only offline access                                      | Travelers retain essential reference information without introducing ambiguous or conflicting offline writes.                                                                                              | Online-only use, queued offline mutations with background merge.                                                        |
+| Link out to Apple Maps and Google Maps                                        | External navigation is more reliable and avoids map-tile providers, API keys, and a larger client bundle.                                                                                                  | Embedded MapLibre, Google Maps SDK.                                                                                     |
+| Make place imagery optional                                                   | Link-rich text cards work for arbitrary destinations, avoid repetitive imagery, and remove an unnecessary asset pipeline.                                                                                  | Mandatory hosted images, remote hotlinking, generated images for every place.                                           |
+| Deploy previews before production                                             | Preview validation reduces deployment risk; production remains an explicit approval step.                                                                                                                  | Immediate production deployment.                                                                                        |
 
 ## Quality, Privacy, and Reliability Principles
 

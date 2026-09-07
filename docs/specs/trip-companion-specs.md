@@ -124,9 +124,11 @@ active gap introduced or changed by the approved conversational design.
 ## Embedded Ask Data and API
 
 - [x] **CHAT-DATA-001**: Each embedded Ask new-place suggestion shall contain the required name, concise one- or two-sentence descriptive summary, nullable locality, unique valid interests, no more than ten unique normalized lower-case tags, profile, unique valid dayparts, nullable duration, nullable cost, nullable reservation recommendation, and nullable HTTPS source URL fields.
-- [x] **CHAT-DATA-002**: The embedded Ask response shall contain a message of no more than 2,000 characters, no more than three unique ranked saved-place IDs, and no more than three valid new-place suggestions.
+- [x] **CHAT-DATA-002**: The embedded Ask response shall contain a message of no more than 2,000 characters, no more than three unique ranked saved-place IDs, no more than three valid new-place suggestions, and the authoritative positive trip version at response completion.
 - [x] **CHAT-DATA-003**: The embedded Ask model context shall include IDs, summaries, and normalized tags for each saved place retained in the bounded authoritative trip details while excluding share tokens, storage identifiers, expiry metadata, and unnecessary timestamps.
 - [x] **CHAT-DATA-004**: The embedded Ask browser shall retain no more than twelve version-2 text messages, saved-place ID lists, and suggestion lists in session storage under a SHA-256-derived trip key that excludes the raw token, and shall discard data from earlier session versions.
+- [x] **CHAT-DATA-005**: Every new-place suggestion in a successful embedded Ask response shall contain a non-null HTTPS source URL while shared saved-place and Action schemas shall remain compatible with nullable source URLs.
+- [x] **CHAT-DATA-006**: The embedded Ask model response shall contain no more than three unique saved-place source candidates, each pairing a saved-place ID with an HTTPS source URL.
 - [x] **CHAT-API-001**: When the embedded Ask API receives a valid bearer token, a 1–2,000 character message, and no more than eight bounded history messages, the system shall load the authoritative trip and return a no-store validated Ask response.
 - [x] **CHAT-API-002**: If the embedded Ask API receives missing or malformed bearer authentication, then the system shall return status 401 before reading trip storage.
 - [x] **CHAT-API-003**: If the embedded Ask API receives an unknown or expired trip token, then the system shall return status 404.
@@ -137,18 +139,27 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-API-008**: If embedded Ask storage or model service is unavailable or required model configuration is absent, then the system shall return status 503 without exposing configuration values.
 - [x] **CHAT-API-009**: If the embedded Ask model exceeds twenty seconds, then the system shall return status 504.
 - [x] **CHAT-API-010**: If the embedded Ask model refuses, returns incomplete output, or returns output that fails the strict response schema, then the system shall return status 502 without returning partial model output.
+- [x] **CHAT-API-011**: When embedded Ask completes successfully, the system shall return the authoritative trip version after any saved-place source enrichment in the no-store response.
+- [x] **CHAT-API-012**: When an embedded Ask request advertises chat contract version 2, the system shall return saved-place IDs and the authoritative trip version; otherwise it shall omit those additive fields so a strict legacy browser can consume the validated response.
 - [x] **CHAT-BE-001**: When generating an embedded Ask response, the system shall configure only a low-context web-search tool with at most one tool call, disable provider storage, and cap model output at 1,600 tokens.
-- [x] **CHAT-BE-002**: When embedded Ask handles a request, the system shall perform no trip repository create, update, or delete operation.
+- [x] **CHAT-BE-002**: When embedded Ask handles a request, the system shall perform no trip repository create or delete operation and no update except validated enrichment of a missing source URL on a returned saved-place match.
 - [x] **CHAT-BE-003**: When embedded Ask receives an itinerary-planning question, the system shall return narrative guidance for the existing Plan proposal workflow without creating a plan proposal.
 - [x] **CHAT-BE-004**: When a valid embedded Ask suggestion is explicitly confirmed, the system shall normalize it through the shared place factory, set `origin` to `chatgpt`, and add it to saved places without adding an itinerary item.
 - [x] **CHAT-BE-005**: When an embedded Ask suggestion matches a saved place by normalized name and locality, the system shall return the authoritative trip without adding another place or itinerary item.
 - [x] **CHAT-BE-006**: If the first confirmed-suggestion mutation conflicts, then the browser shall retry once against the returned authoritative trip with the same mutation identifier.
 - [x] **CHAT-BE-007**: If the confirmed-suggestion mutation conflicts twice, then the browser shall retain the suggestion for another explicit retry.
 - [x] **CHAT-BE-008**: When embedded Ask completes a model request, the system shall log only request metadata, hashed trip identity, duration, status, configured model, and returned token usage.
-- [x] **CHAT-BE-009**: When embedded Ask returns a suggestion source URL, the system shall retain it only when the exact HTTPS URL appeared in the current web-search sources or trusted trip/user context.
-- [x] **CHAT-BE-010**: When the embedded Ask model finds useful saved places for the traveler's current request, it shall return at most three of their IDs in relevance order, return no new-place suggestions, and not invoke web search.
+- [x] **CHAT-BE-009**: When no valid saved-place match remains, embedded Ask shall return only new-place candidates whose non-null source URL exactly matches an HTTPS URL in the current response's bounded web-search evidence, silently discarding all other candidates.
+- [x] **CHAT-BE-010**: When the embedded Ask model finds useful saved places for the traveler's current request, it shall return at most three of their IDs in relevance order, return no new-place suggestions, avoid web search when every match has a source URL, and invoke no more than one bulk web search when any match lacks a source URL.
 - [x] **CHAT-BE-011**: When embedded Ask receives model-ranked saved-place IDs, the system shall preserve their first-occurrence order, silently discard duplicates and IDs outside both the bounded context and authoritative trip, and suppress all new-place suggestions if at least one valid ID remains.
-- [x] **CHAT-BE-012**: When the embedded Ask model finds no useful saved place in the bounded context, it shall return no saved-place IDs and retain the existing single bulk web-search workflow for sourced new-place suggestions.
+- [x] **CHAT-BE-012**: When the embedded Ask model finds no useful saved place in the bounded context, it shall return no saved-place IDs, invoke no more than one bounded bulk web search, and return no new-place suggestion unless that search supplies its verified source URL.
+- [x] **CHAT-BE-013**: If a new-place or saved-place source URL appears only in trip context, user input, conversation history, or model narrative rather than the current bounded web-search evidence, then embedded Ask shall not use that URL as current source evidence.
+- [x] **CHAT-BE-014**: When a traveler confirms a sourced embedded Ask suggestion, the system shall preserve its validated source URL unchanged on the saved place without scheduling the place.
+- [x] **CHAT-BE-015**: When embedded Ask receives a saved-place source candidate, the system shall accept it only when its ID is a valid returned saved-place match, the authoritative place has no source URL, and its exact HTTPS URL occurs in the current response's bounded web-search evidence.
+- [x] **CHAT-BE-016**: When embedded Ask accepts one or more saved-place source candidates, the system shall atomically add all still-missing URLs, update only the affected place timestamps and document timestamp, increment the trip version once, and preserve recent mutation IDs.
+- [x] **CHAT-BE-017**: If the first automatic saved-place source update conflicts, then embedded Ask shall reload the authoritative trip and retry once only for matched places that still exist and still lack a source URL.
+- [x] **CHAT-BE-018**: If an automatic saved-place source candidate targets a place that already has a URL or conflicts twice, then embedded Ask shall preserve the existing trip fields, never overwrite a source URL, and return the latest known authoritative trip version without claiming the candidate was saved.
+- [x] **CHAT-BE-019**: When embedded Ask automatically enriches saved-place source URLs, the system shall not add or remove places, change itinerary items, or recalculate a plan proposal.
 
 ## Embedded Ask Interface
 
@@ -158,9 +169,10 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-UI-004**: When a traveler dismisses an Ask suggestion, the interface shall remove only that session-local card without mutating the trip.
 - [x] **CHAT-UI-005**: When a traveler adds an Ask suggestion, the interface shall expose saved, duplicate, retryable-conflict, or error status and retain the card when retry is possible.
 - [x] **CHAT-UI-006**: While the workspace is offline, the Ask composer and suggestion-add controls shall be disabled while prior session messages and saved-match details remain readable.
-- [x] **CHAT-UI-007**: When an Ask response contains a place suggestion, the interface shall display generated Apple Maps, Google Maps, and directions actions before the traveler adds it to the trip, and shall display a “Learn more” HTTPS source link when one is present.
+- [x] **CHAT-UI-007**: When an Ask response contains a new-place suggestion, the interface shall display its required HTTPS source as a clickable “Learn more” action alongside generated Apple Maps, Google Maps, and directions actions before the traveler adds it to the trip.
 - [x] **CHAT-UI-008**: When an Ask response contains a valid saved-place ID, the interface shall render the current authoritative saved place's name, existing summary, useful tags, optional reference link, Apple Maps link, Google Maps link, and directions link in model-ranked order on mobile and desktop layouts.
 - [x] **CHAT-UI-009**: When a traveler activates “View in Ideas” from an Ask saved-match card, the interface shall navigate to that authoritative saved place in Ideas without adding, removing, editing, favoriting, or scheduling any place.
+- [x] **CHAT-UI-010**: When a successful Ask response reports a newer trip version, the interface shall revalidate the authoritative trip and render an automatically added saved-place source as a clickable “Visit source” action.
 
 ## Optimization Proposals
 
@@ -287,6 +299,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **PWA-UI-006**: When an application update is available while an edit form is dirty, the system shall defer activation until a later navigation.
 - [x] **PWA-PROC-005**: While a shared-trip workspace is visible and online, the browser shall revalidate trip data every 15 seconds and on window focus.
 - [x] **PWA-PROC-006**: While a shared-trip workspace is visible and online, the browser shall revalidate condition data every 15 minutes.
+- [x] **PWA-PROC-007**: When the trip companion runs outside production, the browser shall unregister service workers left on the local origin, reload once when the page was controlled, and shall not register or populate a development application cache.
 - [x] **PWA-UI-007**: While the device is offline, the trip companion shall disable embedded Ask generation and confirmation without deleting session-local messages.
 
 ## Security and Privacy

@@ -464,6 +464,12 @@ export function TripWorkspace() {
     }
   }
 
+  // @spec CHAT-API-011, CHAT-UI-010
+  async function refreshTripAfterAsk(tripVersion: number) {
+    if (!trip || tripVersion <= trip.version) return;
+    await tripState.mutate();
+  }
+
   async function commit(mutation: TripMutation) {
     await performMutation(mutation);
   }
@@ -1034,6 +1040,7 @@ export function TripWorkspace() {
             online={!isOffline}
             onAddSuggestion={addSuggestedPlace}
             onViewSavedPlace={viewSavedPlace}
+            onTripVersion={refreshTripAfterAsk}
           />
         )}
       </main>

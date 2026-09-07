@@ -22,15 +22,17 @@ interface TripChatProps {
   online: boolean;
   onAddSuggestion: (suggestion: SuggestedPlace) => Promise<AddSuggestionResult>;
   onViewSavedPlace: (placeId: string) => void;
+  onTripVersion?: (version: number) => void | Promise<void>;
 }
 
-// @spec CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-008, CHAT-UI-009, PWA-UI-007
+// @spec CHAT-API-011, CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-008, CHAT-UI-009, CHAT-UI-010, PWA-UI-007
 export function TripChat({
   token,
   trip,
   online,
   onAddSuggestion,
   onViewSavedPlace,
+  onTripVersion,
 }: TripChatProps) {
   const [messages, setMessages] = useState<ChatSessionMessage[]>([]);
   const [composer, setComposer] = useState("");
@@ -85,6 +87,7 @@ export function TripChat({
         headers: {
           authorization: `Bearer ${token}`,
           "content-type": "application/json",
+          "x-trip-chat-contract": "2",
         },
         body: JSON.stringify({ message, history }),
       });
@@ -107,6 +110,9 @@ export function TripChat({
           },
         ].slice(-12),
       );
+      if (parsed.tripVersion > trip.version) {
+        void onTripVersion?.(parsed.tripVersion);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Ask is unavailable");
     } finally {

@@ -15,7 +15,7 @@ test("provides Ask as the fourth trip navigation destination", async ({
   await expect(navigation.getByRole("link", { name: "Ask" })).toBeVisible();
 });
 
-// @spec CHAT-UI-002, CHAT-UI-004, CHAT-UI-005, CHAT-UI-007, CHAT-BE-004, CHAT-BE-005
+// @spec CHAT-DATA-005, CHAT-UI-002, CHAT-UI-004, CHAT-UI-005, CHAT-UI-007, CHAT-BE-004, CHAT-BE-005, CHAT-BE-014
 test("adds a reviewed Ask suggestion to Ideas for collaborators without scheduling it", async ({
   page,
   browser,
@@ -116,6 +116,45 @@ test("finds a saved place from natural language without changing the trip", asyn
     page.getByRole("article", { name: "Oscar's Mexican Seafood" }),
   ).toBeVisible();
   expect(backend.getTrip()).toEqual(originalTrip);
+});
+
+// @spec CHAT-BE-002, CHAT-BE-015, CHAT-BE-016, CHAT-BE-019, CHAT-API-011, CHAT-UI-010
+test("automatically adds and renders a verified source for an unsourced saved match", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend();
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  expect(
+    backend
+      .getTrip()
+      .places.find((place: { id: string }) => place.id === "place-torrey-pines")
+      ?.sourceUrl,
+  ).toBeNull();
+
+  await page.getByRole("link", { name: "Ask" }).click();
+  await page
+    .getByLabel("Ask about this trip")
+    .fill("Tell me about Torrey Pines");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const match = page.getByTestId("saved-match-card");
+  await expect(match).toHaveAttribute(
+    "aria-label",
+    "Torrey Pines State Reserve",
+  );
+  await expect(
+    match.getByRole("link", { name: "Visit source" }),
+  ).toHaveAttribute("href", "https://www.parks.ca.gov/torreypines");
+  const changed = backend.getTrip();
+  expect(changed.version).toBe(2);
+  expect(
+    changed.places.find(
+      (place: { id: string }) => place.id === "place-torrey-pines",
+    )?.sourceUrl,
+  ).toBe("https://www.parks.ca.gov/torreypines");
+  expect(changed.itinerary).toEqual([]);
+  expect(changed.proposals).toEqual([]);
 });
 
 // @spec TRIP-UI-001, TRIP-UI-002, TRIP-UI-003

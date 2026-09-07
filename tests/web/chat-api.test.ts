@@ -4,12 +4,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTripChatHandler } from "@/lib/chat/handlers";
 import type { TripChatModel } from "@/lib/chat/model";
-import { tripChatResponseSchema } from "@/lib/chat/schema";
+import {
+  tripChatCandidateResponseSchema,
+  tripChatResponseSchema,
+} from "@/lib/chat/schema";
 import { createMemoryRateLimiter } from "@/lib/trips/rate-limit";
 import { createMemoryTripRepository } from "@/lib/trips/repository-memory";
 import { tripKeyForToken } from "@/lib/trips/token";
 import { makeTripV2, SHARE_TOKEN } from "./fixtures";
 
+const trustedSourceUrl = "https://www.sandiego.gov/lifeguards/beaches/cove";
 const suggestion = {
   name: "La Jolla Cove",
   summary: "A compact coastal stop for views and wildlife.",
@@ -21,12 +25,17 @@ const suggestion = {
   durationMinutes: 90,
   costLevel: 0,
   reservationRecommended: false,
-  sourceUrl: null,
+  sourceUrl: trustedSourceUrl,
 };
 
 function chatRequest(
   body: unknown,
-  options: { token?: string; ip?: string; raw?: string } = {},
+  options: {
+    token?: string;
+    ip?: string;
+    raw?: string;
+    contractVersion?: 2 | null;
+  } = {},
 ) {
   const headers = new Headers({
     "content-type": "application/json",
@@ -34,6 +43,9 @@ function chatRequest(
   });
   if (options.token !== undefined) {
     headers.set("authorization", `Bearer ${options.token}`);
+  }
+  if (options.contractVersion !== null) {
+    headers.set("x-trip-chat-contract", "2");
   }
   return new Request("https://trip.test/api/trip/chat", {
     method: "POST",
@@ -61,8 +73,10 @@ async function setup(
             output: {
               message: "Try the coast this morning.",
               savedPlaceIds: [],
+              savedPlaceSources: [],
               suggestions: [suggestion],
             },
+            sources: [trustedSourceUrl],
             usage: { inputTokens: 120, outputTokens: 80, totalTokens: 200 },
           }),
         }
@@ -83,7 +97,7 @@ async function setup(
 beforeEach(() => vi.restoreAllMocks());
 
 // @spec CHAT-API-001, CHAT-DATA-002, CHAT-DATA-003, CHAT-BE-002, CHAT-BE-008, SEC-DATA-008
-it("loads authoritative bounded context, logs metadata, and never mutates the trip", async () => {
+it("loads authoritative bounded context, logs metadata, and avoids unrelated mutations", async () => {
   const { POST, repository, model, logger } = await setup();
   const get = vi.spyOn(repository, "get");
   const update = vi.spyOn(repository, "update");
@@ -103,6 +117,7 @@ it("loads authoritative bounded context, logs metadata, and never mutates the tr
     message: "Try the coast this morning.",
     savedPlaceIds: [],
     suggestions: [suggestion],
+    tripVersion: 1,
   });
   expect(get).toHaveBeenCalledOnce();
   expect(update).not.toHaveBeenCalled();
@@ -131,6 +146,24 @@ it("loads authoritative bounded context, logs metadata, and never mutates the tr
   );
   expect(JSON.stringify(logger.mock.calls)).not.toContain("What fits");
   expect(JSON.stringify(logger.mock.calls)).not.toContain(SHARE_TOKEN);
+});
+
+// @spec CHAT-API-012
+it("omits the additive trip version for a legacy cached client", async () => {
+  const { POST } = await setup();
+
+  const response = await POST(
+    chatRequest(
+      { message: "What fits this morning?", history: [] },
+      { token: SHARE_TOKEN, contractVersion: null },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    message: "Try the coast this morning.",
+    suggestions: [suggestion],
+  });
 });
 
 // @spec CHAT-API-002, CHAT-API-003
@@ -268,7 +301,12 @@ it("fails closed for configuration, timeout, and malformed model output", async 
 
   const malformed: TripChatModel = {
     generate: vi.fn().mockResolvedValue({
-      output: { message: "partial", savedPlaceIds: [], suggestions: [{}] },
+      output: {
+        message: "partial",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [{}],
+      },
     }),
   };
   expect(
@@ -282,16 +320,16 @@ it("fails closed for configuration, timeout, and malformed model output", async 
   ).toBe(502);
 });
 
-// @spec CHAT-DATA-001, CHAT-BE-009, SEC-API-006
+// @spec CHAT-DATA-001, CHAT-DATA-005, CHAT-BE-009, CHAT-BE-013, SEC-API-006
 it("keeps web-search sources and removes ungrounded model URLs", async () => {
-  const trustedUrl = "https://www.sandiego.gov/lifeguards/beaches/cove";
   const model: TripChatModel = {
     generate: vi.fn().mockResolvedValue({
       output: {
         message: "Try this.",
         savedPlaceIds: [],
+        savedPlaceSources: [],
         suggestions: [
-          { ...suggestion, sourceUrl: trustedUrl },
+          { ...suggestion, sourceUrl: trustedSourceUrl },
           {
             ...suggestion,
             name: "Imaginary Cove",
@@ -299,7 +337,7 @@ it("keeps web-search sources and removes ungrounded model URLs", async () => {
           },
         ],
       },
-      sources: [trustedUrl, "http://unsafe.example/place"],
+      sources: [trustedSourceUrl, "http://unsafe.example/place"],
     }),
   };
   const { POST } = await setup({ model });
@@ -310,8 +348,62 @@ it("keeps web-search sources and removes ungrounded model URLs", async () => {
     ),
   );
   const body = await response.json();
-  expect(body.suggestions[0].sourceUrl).toBe(trustedUrl);
-  expect(body.suggestions[1].sourceUrl).toBeNull();
+  expect(body.suggestions).toEqual([
+    expect.objectContaining({ sourceUrl: trustedSourceUrl }),
+  ]);
+});
+
+// @spec CHAT-DATA-005, CHAT-BE-009, CHAT-BE-012
+it("does not attach a search result to a candidate that omitted its source URL", async () => {
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "I could not ground this suggestion.",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [{ ...suggestion, sourceUrl: null }],
+      },
+      sources: [trustedSourceUrl],
+    }),
+  };
+  const { POST } = await setup({ model });
+
+  const response = await POST(
+    chatRequest(
+      { message: "Suggest somewhere new", history: [] },
+      { token: SHARE_TOKEN },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).suggestions).toEqual([]);
+});
+
+// @spec CHAT-BE-009, CHAT-BE-013
+it("does not treat a URL from user input or model narrative as search evidence", async () => {
+  const unsearchedUrl = "https://example.com/user-supplied-place";
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: `Official website: ${unsearchedUrl}`,
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [{ ...suggestion, sourceUrl: unsearchedUrl }],
+      },
+      sources: [],
+    }),
+  };
+  const { POST } = await setup({ model });
+
+  const response = await POST(
+    chatRequest(
+      { message: `What about ${unsearchedUrl}?`, history: [] },
+      { token: SHARE_TOKEN },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).suggestions).toEqual([]);
 });
 
 // @spec CHAT-DATA-002, CHAT-BE-002, CHAT-BE-011
@@ -325,6 +417,7 @@ it("returns authoritative saved matches in model order and suppresses new sugges
           "not-an-authoritative-place",
           "place-balboa-park",
         ],
+        savedPlaceSources: [],
         suggestions: [suggestion],
       },
     }),
@@ -343,11 +436,12 @@ it("returns authoritative saved matches in model order and suppresses new sugges
     message: "You already saved two good fits.",
     savedPlaceIds: ["place-tacos", "place-balboa-park"],
     suggestions: [],
+    tripVersion: 1,
   });
   expect(update).not.toHaveBeenCalled();
 });
 
-// @spec CHAT-DATA-001, CHAT-DATA-002, CHAT-BE-011
+// @spec CHAT-DATA-001, CHAT-DATA-002, CHAT-DATA-005, CHAT-BE-011
 it("deduplicates model IDs while enforcing uniqueness and summary quality at the public boundary", async () => {
   const duplicateIds = await setup({
     model: {
@@ -355,6 +449,7 @@ it("deduplicates model IDs while enforcing uniqueness and summary quality at the
         output: {
           message: "Matches",
           savedPlaceIds: ["place-tacos", "place-tacos"],
+          savedPlaceSources: [],
           suggestions: [],
         },
       }),
@@ -372,6 +467,15 @@ it("deduplicates model IDs while enforcing uniqueness and summary quality at the
       message: "Matches",
       savedPlaceIds: ["place-tacos", "place-tacos"],
       suggestions: [],
+      tripVersion: 1,
+    }).success,
+  ).toBe(false);
+  expect(
+    tripChatResponseSchema.safeParse({
+      message: "Missing source",
+      savedPlaceIds: [],
+      suggestions: [{ ...suggestion, sourceUrl: null }],
+      tripVersion: 1,
     }).success,
   ).toBe(false);
   expect(
@@ -379,6 +483,7 @@ it("deduplicates model IDs while enforcing uniqueness and summary quality at the
       message: "Too many matches",
       savedPlaceIds: ["one", "two", "three", "four"],
       suggestions: [],
+      tripVersion: 1,
     }).success,
   ).toBe(false);
   expect(
@@ -386,6 +491,7 @@ it("deduplicates model IDs while enforcing uniqueness and summary quality at the
       message: "Invalid tag",
       savedPlaceIds: [],
       suggestions: [{ ...suggestion, tags: ["Mexican"] }],
+      tripVersion: 1,
     }).success,
   ).toBe(false);
 
@@ -395,6 +501,7 @@ it("deduplicates model IDs while enforcing uniqueness and summary quality at the
         output: {
           message: "A new idea",
           savedPlaceIds: [],
+          savedPlaceSources: [],
           suggestions: [{ ...suggestion, summary: "Nice" }],
         },
       }),
@@ -412,6 +519,259 @@ it("deduplicates model IDs while enforcing uniqueness and summary quality at the
   ).toBe(502);
 });
 
+// @spec CHAT-DATA-002, CHAT-DATA-006, CHAT-API-011
+it("requires saved-place source candidates and an authoritative trip version in their respective contracts", () => {
+  expect(
+    tripChatCandidateResponseSchema.safeParse({
+      message: "A saved match",
+      savedPlaceIds: ["place-torrey-pines"],
+      savedPlaceSources: [
+        {
+          savedPlaceId: "place-torrey-pines",
+          sourceUrl: "https://example.com/torrey-pines",
+        },
+      ],
+      suggestions: [],
+    }).success,
+  ).toBe(true);
+  expect(
+    tripChatCandidateResponseSchema.safeParse({
+      message: "Duplicate source candidates",
+      savedPlaceIds: ["place-torrey-pines"],
+      savedPlaceSources: [
+        {
+          savedPlaceId: "place-torrey-pines",
+          sourceUrl: "https://example.com/one",
+        },
+        {
+          savedPlaceId: "place-torrey-pines",
+          sourceUrl: "https://example.com/two",
+        },
+      ],
+      suggestions: [],
+    }).success,
+  ).toBe(false);
+  expect(
+    tripChatResponseSchema.safeParse({
+      message: "A saved match",
+      savedPlaceIds: ["place-torrey-pines"],
+      suggestions: [],
+    }).success,
+  ).toBe(false);
+});
+
+// @spec CHAT-BE-002, CHAT-BE-013, CHAT-BE-015, CHAT-BE-016, CHAT-BE-019, CHAT-API-011
+it("atomically adds a current-search source to a matched saved place without changing the plan", async () => {
+  const sourceUrl = "https://www.parks.ca.gov/torreypines";
+  const trip = makeTripV2();
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Torrey Pines is already in your Ideas.",
+        savedPlaceIds: ["place-torrey-pines"],
+        savedPlaceSources: [{ savedPlaceId: "place-torrey-pines", sourceUrl }],
+        suggestions: [],
+      },
+      sources: [sourceUrl],
+    }),
+  };
+  const { POST, repository } = await setup({ model, trip });
+  const update = vi.spyOn(repository, "update");
+
+  const response = await POST(
+    chatRequest(
+      { message: "Tell me about Torrey Pines", history: [] },
+      { token: SHARE_TOKEN },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    message: "Torrey Pines is already in your Ideas.",
+    savedPlaceIds: ["place-torrey-pines"],
+    suggestions: [],
+    tripVersion: 2,
+  });
+  expect(update).toHaveBeenCalledOnce();
+  const stored = await repository.get(tripKeyForToken(SHARE_TOKEN));
+  const changed = stored!.trip as ReturnType<typeof makeTripV2>;
+  expect(changed.version).toBe(2);
+  expect(changed.updatedAt).toBe("2026-09-06T12:00:00.000Z");
+  expect(
+    changed.places.find(
+      (place: { id: string }) => place.id === "place-torrey-pines",
+    ),
+  ).toMatchObject({
+    sourceUrl,
+    updatedAt: "2026-09-06T12:00:00.000Z",
+  });
+  expect(
+    changed.places.filter(
+      (place: { id: string }) => place.id !== "place-torrey-pines",
+    ),
+  ).toEqual(
+    trip.places.filter(
+      (place: { id: string }) => place.id !== "place-torrey-pines",
+    ),
+  );
+  expect(changed.itinerary).toEqual(trip.itinerary);
+  expect(changed.proposals).toEqual(trip.proposals);
+  expect(stored!.recentMutationIds).toEqual([]);
+});
+
+// @spec CHAT-BE-013, CHAT-BE-015, CHAT-BE-018
+it("discards unsearched, unreturned, and already-sourced saved-place candidates", async () => {
+  const searchedUrl = "https://example.com/searched";
+  const unsearchedUrl = "https://example.com/from-the-message";
+  const trip = makeTripV2();
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: `A narrative URL is not evidence: ${unsearchedUrl}`,
+        savedPlaceIds: ["place-torrey-pines", "place-tacos"],
+        savedPlaceSources: [
+          {
+            savedPlaceId: "place-torrey-pines",
+            sourceUrl: unsearchedUrl,
+          },
+          { savedPlaceId: "place-tacos", sourceUrl: searchedUrl },
+          { savedPlaceId: "place-balboa-park", sourceUrl: searchedUrl },
+        ],
+        suggestions: [],
+      },
+      sources: [searchedUrl],
+    }),
+  };
+  const { POST, repository } = await setup({ model, trip });
+  const update = vi.spyOn(repository, "update");
+
+  const response = await POST(
+    chatRequest(
+      { message: `Use ${unsearchedUrl}`, history: [] },
+      { token: SHARE_TOKEN },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).tripVersion).toBe(1);
+  expect(update).not.toHaveBeenCalled();
+  const stored = await repository.get(tripKeyForToken(SHARE_TOKEN));
+  expect(stored!.trip).toEqual(trip);
+});
+
+// @spec CHAT-BE-017, CHAT-BE-018
+it("retries source enrichment once against a concurrent trip without overwriting that change", async () => {
+  const sourceUrl = "https://www.parks.ca.gov/torreypines";
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Torrey Pines is already saved.",
+        savedPlaceIds: ["place-torrey-pines"],
+        savedPlaceSources: [{ savedPlaceId: "place-torrey-pines", sourceUrl }],
+        suggestions: [],
+      },
+      sources: [sourceUrl],
+    }),
+  };
+  const { POST, repository } = await setup({ model });
+  const originalUpdate = repository.update.bind(repository);
+  let attempts = 0;
+  const update = vi
+    .spyOn(repository, "update")
+    .mockImplementation(async (key, expectedVersion, value) => {
+      attempts += 1;
+      if (attempts === 1) {
+        const current = await repository.get(key);
+        const currentTrip = current!.trip as ReturnType<typeof makeTripV2>;
+        const concurrent = {
+          ...current!,
+          trip: {
+            ...currentTrip,
+            title: "Concurrent title",
+            version: currentTrip.version + 1,
+          },
+        };
+        await originalUpdate(key, expectedVersion, concurrent);
+        return { ok: false, latest: concurrent };
+      }
+      return originalUpdate(key, expectedVersion, value);
+    });
+
+  const response = await POST(
+    chatRequest(
+      { message: "What about Torrey Pines?", history: [] },
+      { token: SHARE_TOKEN },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).tripVersion).toBe(3);
+  expect(update).toHaveBeenCalledTimes(2);
+  const stored = await repository.get(tripKeyForToken(SHARE_TOKEN));
+  const changed = stored!.trip as ReturnType<typeof makeTripV2>;
+  expect(changed.title).toBe("Concurrent title");
+  expect(
+    changed.places.find(
+      (place: { id: string }) => place.id === "place-torrey-pines",
+    )?.sourceUrl,
+  ).toBe(sourceUrl);
+});
+
+// @spec CHAT-BE-018, CHAT-API-011
+it("stops after two source-enrichment conflicts and returns the latest trip version", async () => {
+  const sourceUrl = "https://www.parks.ca.gov/torreypines";
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Torrey Pines is already saved.",
+        savedPlaceIds: ["place-torrey-pines"],
+        savedPlaceSources: [{ savedPlaceId: "place-torrey-pines", sourceUrl }],
+        suggestions: [],
+      },
+      sources: [sourceUrl],
+    }),
+  };
+  const { POST, repository } = await setup({ model });
+  const originalUpdate = repository.update.bind(repository);
+  let conflicts = 0;
+  const update = vi
+    .spyOn(repository, "update")
+    .mockImplementation(async (key, expectedVersion) => {
+      conflicts += 1;
+      const current = await repository.get(key);
+      const currentTrip = current!.trip as ReturnType<typeof makeTripV2>;
+      const concurrent = {
+        ...current!,
+        trip: {
+          ...currentTrip,
+          title: `Concurrent title ${conflicts}`,
+          version: currentTrip.version + 1,
+        },
+      };
+      await originalUpdate(key, expectedVersion, concurrent);
+      return { ok: false, latest: concurrent };
+    });
+
+  const response = await POST(
+    chatRequest(
+      { message: "What about Torrey Pines?", history: [] },
+      { token: SHARE_TOKEN },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).tripVersion).toBe(3);
+  expect(update).toHaveBeenCalledTimes(2);
+  const stored = await repository.get(tripKeyForToken(SHARE_TOKEN));
+  const changed = stored!.trip as ReturnType<typeof makeTripV2>;
+  expect(changed.title).toBe("Concurrent title 2");
+  expect(
+    changed.places.find(
+      (place: { id: string }) => place.id === "place-torrey-pines",
+    )?.sourceUrl,
+  ).toBeNull();
+});
+
 // @spec CHAT-DATA-003, CHAT-BE-011
 it("accepts matches only from the saved places retained by bounded context", async () => {
   const base = makeTripV2();
@@ -425,8 +785,10 @@ it("accepts matches only from the saved places retained by bounded context", asy
       output: {
         message: "No bounded match.",
         savedPlaceIds: ["bounded-place-20"],
+        savedPlaceSources: [],
         suggestions: [suggestion],
       },
+      sources: [trustedSourceUrl],
     }),
   };
   const { POST } = await setup({ model, trip: { ...base, places } });

@@ -77,6 +77,20 @@ it("does not force service-worker activation over dirty forms", () => {
   expect(registration).not.toContain("skipWaiting()");
 });
 
+// @spec PWA-PROC-007
+it("removes stale service workers instead of caching the app in development", () => {
+  const registration = text("lib/offline/register-service-worker.ts");
+
+  expect(registration).toContain('process.env.NODE_ENV !== "production"');
+  expect(registration).toContain("navigator.serviceWorker.getRegistrations()");
+  expect(registration).toContain("registration.unregister()");
+  expect(registration).toContain("window.location.reload()");
+  expect(registration).toContain(
+    'navigator.serviceWorker.register("/sw-prod.js")',
+  );
+  expect(registration).toContain('caches.open("public-v1")');
+});
+
 // @spec OPS-PROC-001
 it("requires a supported Pixi release", () => {
   expect(text("pyproject.toml")).toContain('requires-pixi = ">=0.69,<1"');

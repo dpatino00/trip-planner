@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest";
 import { createOpenAITripChatModel } from "@/lib/chat/openai";
 import { makeTripV2 } from "./fixtures";
 
-// @spec CHAT-DATA-001, CHAT-BE-001, CHAT-BE-003, CHAT-BE-009, CHAT-BE-010, CHAT-BE-012, CHAT-API-010, SEC-API-007
+// @spec CHAT-DATA-001, CHAT-DATA-005, CHAT-DATA-006, CHAT-BE-001, CHAT-BE-003, CHAT-BE-009, CHAT-BE-010, CHAT-BE-012, CHAT-BE-013, CHAT-API-010, SEC-API-007
 it("uses strict Responses parsing with one bounded web search", async () => {
   const sourceUrl = "https://www.sandiego.gov/lifeguards/beaches/cove";
   const parse = vi.fn().mockResolvedValue({
@@ -13,6 +13,7 @@ it("uses strict Responses parsing with one bounded web search", async () => {
     output_parsed: {
       message: "A concise answer",
       savedPlaceIds: [],
+      savedPlaceSources: [],
       suggestions: [],
     },
     output: [
@@ -67,13 +68,27 @@ it("uses strict Responses parsing with one bounded web search", async () => {
     /saved.*first|saved.*before/i,
   );
   expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
-    /saved match.*do not.*web search/i,
+    /saved match.*missing.*source URL.*must.*web search/i,
+  );
+  expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
+    /saved match.*already.*source URL.*do not.*web search/i,
+  );
+  expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
+    /savedPlaceSources.*savedPlaceId.*sourceUrl/i,
   );
   expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
     /one- or two-sentence.*summary.*normalized.*tags/i,
   );
+  expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
+    /must invoke web search.*sourceUrl.*do not put the URL only in the narrative/i,
+  );
   expect(result).toEqual({
-    output: { message: "A concise answer", savedPlaceIds: [], suggestions: [] },
+    output: {
+      message: "A concise answer",
+      savedPlaceIds: [],
+      savedPlaceSources: [],
+      suggestions: [],
+    },
     sources: [sourceUrl],
     usage: { inputTokens: 42, outputTokens: 12, totalTokens: 54 },
   });

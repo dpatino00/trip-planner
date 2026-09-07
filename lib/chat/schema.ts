@@ -20,6 +20,19 @@ const daypartSchema = z.enum([
 ]);
 
 const savedPlaceIdsSchema = z.array(z.string().trim().min(1).max(120)).max(3);
+const savedPlaceSourceCandidateSchema = z
+  .object({
+    savedPlaceId: z.string().trim().min(1).max(120),
+    sourceUrl: z.string().url().startsWith("https://"),
+  })
+  .strict();
+const savedPlaceSourcesSchema = z
+  .array(savedPlaceSourceCandidateSchema)
+  .max(3)
+  .refine(
+    (values) =>
+      new Set(values.map((value) => value.savedPlaceId)).size === values.length,
+  );
 
 function hasOneOrTwoSentences(value: string) {
   const endings = value.match(/[.!?](?:\s|$)/g)?.length ?? 0;
@@ -52,22 +65,30 @@ export const suggestedPlaceSchema = z
   })
   .strict();
 
+const sourcedSuggestedPlaceSchema = suggestedPlaceSchema.extend({
+  sourceUrl: z.string().url().startsWith("https://"),
+});
+
+// @spec CHAT-DATA-002, CHAT-API-011
 export const tripChatResponseSchema = z
   .object({
     message: z.string().trim().min(1).max(2000),
     savedPlaceIds: savedPlaceIdsSchema.refine(
       (values) => new Set(values).size === values.length,
     ),
-    suggestions: z.array(suggestedPlaceSchema).max(3),
+    suggestions: z.array(sourcedSuggestedPlaceSchema).max(3),
+    tripVersion: z.number().int().positive(),
   })
   .strict();
 
 // Model candidates permit duplicate IDs so the authoritative handler can
 // silently normalize them before validating the public response contract.
+// @spec CHAT-DATA-006
 export const tripChatCandidateResponseSchema = z
   .object({
     message: z.string().trim().min(1).max(2000),
     savedPlaceIds: savedPlaceIdsSchema,
+    savedPlaceSources: savedPlaceSourcesSchema,
     suggestions: z.array(suggestedPlaceSchema).max(3),
   })
   .strict();
@@ -90,11 +111,19 @@ const suggestedPlaceModelSchema = z
     sourceUrl: z.string().nullable(),
   })
   .strict();
+const savedPlaceSourceModelSchema = z
+  .object({
+    savedPlaceId: z.string(),
+    sourceUrl: z.string(),
+  })
+  .strict();
 
+// @spec CHAT-DATA-006
 export const tripChatModelResponseSchema = z
   .object({
     message: z.string(),
     savedPlaceIds: z.array(z.string()).max(3),
+    savedPlaceSources: z.array(savedPlaceSourceModelSchema).max(3),
     suggestions: z.array(suggestedPlaceModelSchema).max(3),
   })
   .strict();
