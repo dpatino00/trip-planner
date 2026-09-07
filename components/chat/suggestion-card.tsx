@@ -1,4 +1,5 @@
 import type { SuggestedPlace } from "@/lib/types";
+import { createPlaceMapLinks } from "@/lib/places/links";
 
 export type SuggestionStatus =
   "idle" | "adding" | "saved" | "duplicate" | "conflict" | "error";
@@ -11,7 +12,7 @@ interface SuggestionCardProps {
   onDismiss: () => void;
 }
 
-// @spec CHAT-UI-004, CHAT-UI-005, CHAT-UI-006
+// @spec CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-007, PLC-BE-005
 export function SuggestionCard({
   suggestion,
   status,
@@ -19,6 +20,7 @@ export function SuggestionCard({
   onAdd,
   onDismiss,
 }: SuggestionCardProps) {
+  const maps = createPlaceMapLinks(suggestion);
   const saved = status === "saved" || status === "duplicate";
   const label =
     status === "saved"
@@ -47,6 +49,24 @@ export function SuggestionCard({
         <p className={status === "error" ? "error" : "verified"}>{label}</p>
       ) : null}
       <div className="card-actions">
+        {suggestion.sourceUrl ? (
+          <a
+            href={suggestion.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Learn more
+          </a>
+        ) : null}
+        <a href={maps.apple} target="_blank" rel="noopener noreferrer">
+          Apple Maps
+        </a>
+        <a href={maps.google} target="_blank" rel="noopener noreferrer">
+          Google Maps
+        </a>
+        <a href={maps.directions} target="_blank" rel="noopener noreferrer">
+          Directions
+        </a>
         <button
           className="primary"
           disabled={!online || status === "adding" || saved}

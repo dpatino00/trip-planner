@@ -19,7 +19,7 @@ const suggestion = {
   durationMinutes: 90,
   costLevel: 0,
   reservationRecommended: false,
-  sourceUrl: null,
+  sourceUrl: "https://www.sandiego.gov/lifeguards/beaches/cove",
 };
 
 async function setup() {
@@ -66,6 +66,7 @@ it("adds a confirmed suggestion to Ideas only and treats duplicates as no-ops", 
   expect(addedTrip.places.at(-1)).toMatchObject({
     name: "La Jolla Cove",
     origin: "chatgpt",
+    sourceUrl: suggestion.sourceUrl,
   });
   expect(addedTrip.itinerary).toEqual(trip.itinerary);
 

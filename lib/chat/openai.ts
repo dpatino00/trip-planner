@@ -13,6 +13,7 @@ type ResponsesClient = {
     ) => Promise<{
       status?: string;
       output_parsed?: unknown;
+      output?: unknown[];
       usage?: {
         input_tokens?: number;
         output_tokens?: number;
@@ -24,7 +25,29 @@ type ResponsesClient = {
 
 const instructions = `You are the embedded trip companion. Use only the supplied trip and conversation context.
 Return concise, practical narrative advice. For itinerary-planning requests, explain options and direct the traveler to the existing Plan/proposal workflow; never create or claim to apply a proposal.
-You may suggest up to three places. Do not use tools, browse, fetch URLs, or claim live venue facts. A sourceUrl must be null unless that exact HTTPS URL appears in the supplied context. Suggestions are unverified until the traveler reviews them.`;
+You may suggest up to three places. When you return place suggestions, use no more than one web search call to find one trustworthy reference for all suggestions together. Prefer each place's official venue, park, museum, government, or tourism page. Copy an exact HTTPS URL from the search sources into sourceUrl; use null when no credible matching source exists. Do not search for narrative-only answers. Do not claim other live venue facts. Suggestions remain reviewable until the traveler adds them.`;
+
+function webSearchSources(
+  output: Awaited<ReturnType<ResponsesClient["responses"]["parse"]>>["output"],
+) {
+  const sources = new Set<string>();
+  for (const item of output ?? []) {
+    if (!item || typeof item !== "object" || !("type" in item)) continue;
+    if (item.type !== "web_search_call" || !("action" in item)) continue;
+    const action = item.action;
+    if (!action || typeof action !== "object" || !("type" in action)) continue;
+    if (action.type !== "search" || !("sources" in action)) continue;
+    const rawSources = action.sources;
+    if (!Array.isArray(rawSources)) continue;
+    for (const source of rawSources) {
+      if (!source || typeof source !== "object") continue;
+      if (!("type" in source) || !("url" in source)) continue;
+      if (source.type !== "url" || typeof source.url !== "string") continue;
+      sources.add(source.url);
+    }
+  }
+  return [...sources];
+}
 
 // This module is imported only by the Node route runtime and never by client components.
 // @spec CHAT-BE-001, CHAT-API-010, SEC-API-007
@@ -39,6 +62,9 @@ export function createOpenAITripChatModel(options: {
           model: options.model,
           store: false,
           max_output_tokens: 1600,
+          max_tool_calls: 1,
+          include: ["web_search_call.action.sources"],
+          tools: [{ type: "web_search", search_context_size: "low" }],
           input: [
             { role: "system", content: instructions },
             {
@@ -64,6 +90,7 @@ export function createOpenAITripChatModel(options: {
       }
       return {
         output: response.output_parsed,
+        sources: webSearchSources(response.output),
         usage: response.usage
           ? {
               inputTokens: response.usage.input_tokens,

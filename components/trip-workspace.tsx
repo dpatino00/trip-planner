@@ -172,7 +172,7 @@ function PlaceCard({
           <a href={maps.google} target="_blank" rel="noopener noreferrer">
             Google Maps{disabled ? " — requires connection" : ""}
           </a>
-          <a href={maps.google} target="_blank" rel="noopener noreferrer">
+          <a href={maps.directions} target="_blank" rel="noopener noreferrer">
             Directions{disabled ? " — requires connection" : ""}
           </a>
         </div>

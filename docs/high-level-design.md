@@ -35,8 +35,10 @@ secondary client.
   preferences, place coordinates, and optional on-device proximity.
 - Let a trusted travel group share favorites and a day-by-day itinerary without
   creating accounts.
-- Give every place a useful external destination through a supplied source URL or
-  a generated Maps search link; place imagery is optional.
+- Give every saved place and Ask suggestion useful Apple Maps, Google Maps, and
+  Google Maps directions links generated from its name, locality, and available
+  coordinates; preserve a supplied source URL when present. Place imagery is
+  optional.
 - Remain useful with weak connectivity by preserving the app shell, saved places, and
   last successfully loaded trip data and conditions.
 - Deliver a polished, accessible, installable experience optimized for phones.
@@ -48,8 +50,8 @@ secondary client.
 ## Non-Goals
 
 - Persisting chat history as shared trip data or across browser sessions.
-- Allowing the embedded model to call tools, browse the web, or directly mutate
-  a trip.
+- Allowing the embedded model to use tools other than one bounded web search for
+  place-reference links, or to directly mutate a trip.
 - Allowing the GPT to edit application code, deploy the website, make bookings,
   purchase anything, or delete a trip.
 - Letting automated optimization silently overwrite confirmed itinerary choices.
@@ -113,7 +115,8 @@ The Next.js App Router application will serve the interface, destination-neutral
 place data, same-origin trip and chat endpoints, and a small public Action API.
 The chat endpoint authenticates the share token, loads an authoritative compact
 trip context, and asks the OpenAI Responses API for narrative advice and up to
-three structured place suggestions. It has no mutation tools. The browser sends
+three structured place suggestions. One bounded web-search call may find HTTPS
+reference links for those suggestions; no mutation tools are configured. The browser sends
 an explicit, versioned trip mutation only after a traveler chooses Add to trip.
 
 The Action API will require a dedicated, revocable integration key configured as

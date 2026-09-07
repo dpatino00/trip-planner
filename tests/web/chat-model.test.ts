@@ -5,11 +5,21 @@ import { expect, it, vi } from "vitest";
 import { createOpenAITripChatModel } from "@/lib/chat/openai";
 import { makeTripV2 } from "./fixtures";
 
-// @spec CHAT-BE-001, CHAT-BE-003, CHAT-API-010, SEC-API-007
-it("uses strict Responses parsing without tools or provider storage", async () => {
+// @spec CHAT-BE-001, CHAT-BE-003, CHAT-BE-009, CHAT-API-010, SEC-API-007
+it("uses strict Responses parsing with one bounded web search", async () => {
+  const sourceUrl = "https://www.sandiego.gov/lifeguards/beaches/cove";
   const parse = vi.fn().mockResolvedValue({
     status: "completed",
     output_parsed: { message: "A concise answer", suggestions: [] },
+    output: [
+      {
+        type: "web_search_call",
+        action: {
+          type: "search",
+          sources: [{ type: "url", url: sourceUrl }],
+        },
+      },
+    ],
     usage: { input_tokens: 42, output_tokens: 12, total_tokens: 54 },
   });
   const model = createOpenAITripChatModel({
@@ -36,16 +46,22 @@ it("uses strict Responses parsing without tools or provider storage", async () =
       model: "gpt-test",
       store: false,
       max_output_tokens: 1600,
+      max_tool_calls: 1,
+      include: ["web_search_call.action.sources"],
+      tools: [{ type: "web_search", search_context_size: "low" }],
       text: expect.objectContaining({ format: expect.any(Object) }),
     }),
     expect.anything(),
   );
-  expect(parse.mock.calls[0][0]).not.toHaveProperty("tools");
   expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
     /Plan\/proposal workflow/,
   );
+  expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
+    /official.*reference/i,
+  );
   expect(result).toEqual({
     output: { message: "A concise answer", suggestions: [] },
+    sources: [sourceUrl],
     usage: { inputTokens: 42, outputTokens: 12, totalTokens: 54 },
   });
 });

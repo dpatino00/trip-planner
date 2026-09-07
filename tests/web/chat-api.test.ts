@@ -270,16 +270,23 @@ it("fails closed for configuration, timeout, and malformed model output", async 
   ).toBe(502);
 });
 
-// @spec CHAT-DATA-001, SEC-API-006
-it("removes a model-supplied source URL that was absent from trusted context", async () => {
+// @spec CHAT-DATA-001, CHAT-BE-009, SEC-API-006
+it("keeps web-search sources and removes ungrounded model URLs", async () => {
+  const trustedUrl = "https://www.sandiego.gov/lifeguards/beaches/cove";
   const model: TripChatModel = {
     generate: vi.fn().mockResolvedValue({
       output: {
         message: "Try this.",
         suggestions: [
-          { ...suggestion, sourceUrl: "https://hallucinated.example/place" },
+          { ...suggestion, sourceUrl: trustedUrl },
+          {
+            ...suggestion,
+            name: "Imaginary Cove",
+            sourceUrl: "https://hallucinated.example/place",
+          },
         ],
       },
+      sources: [trustedUrl, "http://unsafe.example/place"],
     }),
   };
   const { POST } = await setup({ model });
@@ -289,5 +296,7 @@ it("removes a model-supplied source URL that was absent from trusted context", a
       { token: SHARE_TOKEN },
     ),
   );
-  expect((await response.json()).suggestions[0].sourceUrl).toBeNull();
+  const body = await response.json();
+  expect(body.suggestions[0].sourceUrl).toBe(trustedUrl);
+  expect(body.suggestions[1].sourceUrl).toBeNull();
 });

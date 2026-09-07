@@ -15,7 +15,7 @@ test("provides Ask as the fourth trip navigation destination", async ({
   await expect(navigation.getByRole("link", { name: "Ask" })).toBeVisible();
 });
 
-// @spec CHAT-UI-002, CHAT-UI-004, CHAT-UI-005, CHAT-BE-004, CHAT-BE-005
+// @spec CHAT-UI-002, CHAT-UI-004, CHAT-UI-005, CHAT-UI-007, CHAT-BE-004, CHAT-BE-005
 test("adds a reviewed Ask suggestion to Ideas for collaborators without scheduling it", async ({
   page,
   browser,
@@ -45,15 +45,26 @@ test("adds a reviewed Ask suggestion to Ideas for collaborators without scheduli
     await page.getByRole("button", { name: "Send" }).click();
     const suggestion = page.getByRole("article", { name: "La Jolla Cove" });
     await expect(suggestion).toBeVisible();
+    await expect(
+      suggestion.getByRole("link", { name: "Learn more" }),
+    ).toHaveAttribute(
+      "href",
+      "https://www.sandiego.gov/lifeguards/beaches/cove",
+    );
     await suggestion
       .getByRole("button", { name: "Add La Jolla Cove to trip" })
       .click();
     await expect(suggestion.getByText("Saved to Ideas")).toBeVisible();
 
     await page.getByRole("link", { name: "Ideas" }).click();
+    const savedPlace = page.getByRole("article", { name: "La Jolla Cove" });
+    await expect(savedPlace).toBeVisible();
     await expect(
-      page.getByRole("article", { name: "La Jolla Cove" }),
-    ).toBeVisible();
+      savedPlace.getByRole("link", { name: "Visit source" }),
+    ).toHaveAttribute(
+      "href",
+      "https://www.sandiego.gov/lifeguards/beaches/cove",
+    );
     await page.getByRole("link", { name: "Plan" }).click();
     await expect(
       page.getByTestId("itinerary-item").filter({ hasText: "La Jolla Cove" }),

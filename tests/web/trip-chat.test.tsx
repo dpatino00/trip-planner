@@ -21,12 +21,12 @@ const suggestion = {
   durationMinutes: 90,
   costLevel: 0 as const,
   reservationRecommended: false,
-  sourceUrl: null,
+  sourceUrl: "https://www.sandiego.gov/lifeguards/beaches/cove",
 };
 
 afterEach(cleanup);
 
-// @spec CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005
+// @spec CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-007
 it("submits with Enter, renders suggestions, dismisses locally, and confirms explicitly", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     Response.json({
@@ -53,6 +53,22 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
 
   expect(await screen.findByText("Try this coastal stop.")).toBeVisible();
   expect(screen.getByText("La Jolla Cove")).toBeVisible();
+  expect(screen.getByRole("link", { name: "Apple Maps" })).toHaveAttribute(
+    "href",
+    expect.stringContaining("maps.apple.com"),
+  );
+  expect(screen.getByRole("link", { name: "Google Maps" })).toHaveAttribute(
+    "href",
+    expect.stringContaining("google.com/maps/search"),
+  );
+  expect(screen.getByRole("link", { name: "Directions" })).toHaveAttribute(
+    "href",
+    expect.stringContaining("google.com/maps/dir"),
+  );
+  expect(screen.getByRole("link", { name: "Learn more" })).toHaveAttribute(
+    "href",
+    suggestion.sourceUrl,
+  );
   expect(onAddSuggestion).not.toHaveBeenCalled();
   fireEvent.click(
     screen.getByRole("button", { name: "Add La Jolla Cove to trip" }),

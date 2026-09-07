@@ -58,7 +58,7 @@ export async function mockTripApi(
           durationMinutes: 90,
           costLevel: 0,
           reservationRecommended: false,
-          sourceUrl: null,
+          sourceUrl: "https://www.sandiego.gov/lifeguards/beaches/cove",
         },
       ],
     }),

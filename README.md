@@ -16,7 +16,9 @@ pixi install
 ```
 
 Copy `.env.example` to `.env.local` for local web configuration. Embedded Ask
-requires server-only `OPENAI_API_KEY` and `OPENAI_MODEL` values. Production trip
+requires server-only `OPENAI_API_KEY` and `OPENAI_MODEL` values; use a model that
+supports Responses API Structured Outputs and web search, such as
+`gpt-5.4-mini`. Production trip
 storage and rate limits require `UPSTASH_REDIS_REST_URL` and
 `UPSTASH_REDIS_REST_TOKEN`.
 

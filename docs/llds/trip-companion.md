@@ -145,9 +145,10 @@ Tags are lower-case strings of 1–30 characters, with at most ten unique tags.
 Duration, when known, is 15–1,440 minutes.
 
 Only `https:` source URLs are retained. A missing or rejected source URL does not
-reject an otherwise valid place; the response carries a warning and the UI uses a
-generated Google Maps or Apple Maps search URL based on `name + locality`. The
-application does not fetch or scrape a supplied URL in the initial release.
+reject an otherwise valid place; the response carries a warning and the UI uses
+generated Apple Maps and Google Maps search URLs plus a Google Maps directions
+URL based on `name + locality` (or available coordinates). The application does
+not fetch, scrape, or web-search for a supplied URL in the initial release.
 
 The `origin` field describes how a place entered the trip, not whether its details
 are authoritative. There is no required image field. Existing local artwork may
@@ -386,14 +387,15 @@ interface TripChatResponse {
 
 All strict Structured Output properties are required; nullable properties
 represent optional concepts. The response message is at most 2,000 characters
-and suggestions are capped at three. `sourceUrl` is null unless the same URL was
-already present in authoritative trip or user context and is always labeled
-unverified.
+and suggestions are capped at three. `sourceUrl` is null unless the same exact
+HTTPS URL appeared in authoritative trip/user context or the current response's
+bounded web-search sources, and is always labeled as a reference.
 
 The injected `TripChatModel` production adapter uses the OpenAI Node SDK,
 `responses.parse()` with `zodTextFormat`, `store: false`, the configured
 `OPENAI_MODEL`, a 1,600-token output cap, and a 20-second timeout. It configures
-no tools, browsing, or arbitrary HTTP. Invalid, incomplete, or refused model
+only low-context web search and allows at most one tool call for all suggestions
+in a response; no arbitrary HTTP or mutation tools are available. Invalid, incomplete, or refused model
 output returns `502`; timeout returns `504`; missing server configuration or an
 unavailable model/storage service returns `503`.
 
@@ -565,15 +567,17 @@ primary navigation uses **Today**, **Ideas**, **Plan**, and **Ask**.
 
 Ask owns its composer, loading, error, messages, and inline suggestion cards.
 Enter submits, Shift+Enter inserts a newline, and generation/add controls are
-disabled offline. Suggestion cards provide explicit **Add to trip** and
-session-local **Dismiss** controls and expose saved, duplicate, or retry states.
+disabled offline. Suggestion cards provide generated Apple Maps, Google Maps,
+and Google Maps directions links before confirmation, plus a supplied source
+link when present. They retain explicit **Add to trip** and session-local
+**Dismiss** controls and expose saved, duplicate, or retry states.
 
 Place cards are content-first rather than photo-first. Each card shows:
 
 - name, locality, summary, and relevant tags;
 - recommendation reasons or scheduling state;
 - an optional “Visit source” link;
-- guaranteed Apple Maps and Google Maps search actions;
+- guaranteed Apple Maps, Google Maps search, and Google Maps directions actions;
 - an understated origin label such as “Added from ChatGPT”; and
 - no empty image frame when artwork is absent.
 
@@ -609,8 +613,9 @@ writes and chat generation are not queued. Session-local chat remains readable.
   format validation. Missing or malformed credentials fail before storage reads.
 - Neither secret appears in paths, queries, response bodies, app logs, analytics,
   browser persistence, or service-worker cache keys.
-- `OPENAI_API_KEY` and `OPENAI_MODEL` are server-only. Model calls use no tools
-  and are not stored by the provider (`store: false`).
+- `OPENAI_API_KEY` and `OPENAI_MODEL` are server-only. `OPENAI_MODEL` must
+  support Responses API Structured Outputs and web search. Model calls configure
+  only bounded web search and are not stored by the provider (`store: false`).
 - Chat logs contain only event name, request ID, configured model, hashed trip
   identifier, duration, status, and returned token usage—never conversation
   content, raw addresses, tokens, or secrets.

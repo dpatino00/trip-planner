@@ -226,6 +226,7 @@ export function createTripChatHandler({
         JSON.stringify(context),
         parsed.data.message,
         ...parsed.data.history.map((item) => item.content),
+        ...(generated.sources ?? []),
       ]);
       return result({
         ...output.data,

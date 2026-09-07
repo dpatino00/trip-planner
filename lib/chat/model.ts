@@ -9,6 +9,7 @@ export interface TripChatUsage {
 
 export interface TripChatModelResult {
   output: unknown;
+  sources?: string[];
   usage?: TripChatUsage;
 }
 

@@ -36,10 +36,10 @@ active gap introduced or changed by the approved conversational design.
 - [ ] **PLC-BE-002**: If the system discards invalid optional place data, then it shall return a warning identifying the discarded field.
 - [ ] **PLC-BE-003**: When a place-add request matches an existing normalized name and locality, the system shall return the existing place without creating another place.
 - [ ] **PLC-BE-004**: When the system returns an existing place for a duplicate place-add request, it shall include a duplicate warning.
-- [ ] **PLC-BE-005**: When the system presents a saved place, it shall derive Apple Maps and Google Maps search destinations from the place name, locality, and available coordinates.
+- [x] **PLC-BE-005**: When the system presents a saved place or an Ask suggestion, it shall derive Apple Maps and Google Maps search destinations plus a Google Maps directions destination from the place name, locality, and available coordinates.
 - [ ] **PLC-UI-001**: Each saved-place card shall display its name, locality when known, summary, and relevant tags without requiring an image.
 - [ ] **PLC-UI-002**: While a saved place has a source URL, its card shall provide a “Visit source” action.
-- [ ] **PLC-UI-003**: Each saved-place card shall provide Apple Maps and Google Maps actions.
+- [x] **PLC-UI-003**: Each saved-place card shall provide Apple Maps, Google Maps, and directions actions.
 - [ ] **PLC-UI-004**: While a saved place has ChatGPT origin, its card shall identify that origin without claiming the place details are verified.
 - [ ] **PLC-UI-005**: While a saved place has no image, its card shall omit the image region rather than display an empty placeholder.
 
@@ -137,7 +137,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-API-008**: If embedded Ask storage or model service is unavailable or required model configuration is absent, then the system shall return status 503 without exposing configuration values.
 - [x] **CHAT-API-009**: If the embedded Ask model exceeds twenty seconds, then the system shall return status 504.
 - [x] **CHAT-API-010**: If the embedded Ask model refuses, returns incomplete output, or returns output that fails the strict response schema, then the system shall return status 502 without returning partial model output.
-- [x] **CHAT-BE-001**: When generating an embedded Ask response, the system shall configure no model tools or web access, disable provider storage, and cap model output at 1,600 tokens.
+- [x] **CHAT-BE-001**: When generating an embedded Ask response, the system shall configure only a low-context web-search tool with at most one tool call, disable provider storage, and cap model output at 1,600 tokens.
 - [x] **CHAT-BE-002**: When embedded Ask handles a request, the system shall perform no trip repository create, update, or delete operation.
 - [x] **CHAT-BE-003**: When embedded Ask receives an itinerary-planning question, the system shall return narrative guidance for the existing Plan proposal workflow without creating a plan proposal.
 - [x] **CHAT-BE-004**: When a valid embedded Ask suggestion is explicitly confirmed, the system shall normalize it through the shared place factory, set `origin` to `chatgpt`, and add it to saved places without adding an itinerary item.
@@ -145,6 +145,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-BE-006**: If the first confirmed-suggestion mutation conflicts, then the browser shall retry once against the returned authoritative trip with the same mutation identifier.
 - [x] **CHAT-BE-007**: If the confirmed-suggestion mutation conflicts twice, then the browser shall retain the suggestion for another explicit retry.
 - [x] **CHAT-BE-008**: When embedded Ask completes a model request, the system shall log only request metadata, hashed trip identity, duration, status, configured model, and returned token usage.
+- [x] **CHAT-BE-009**: When embedded Ask returns a suggestion source URL, the system shall retain it only when the exact HTTPS URL appeared in the current web-search sources or trusted trip/user context.
 
 ## Embedded Ask Interface
 
@@ -154,6 +155,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-UI-004**: When a traveler dismisses an Ask suggestion, the interface shall remove only that session-local card without mutating the trip.
 - [x] **CHAT-UI-005**: When a traveler adds an Ask suggestion, the interface shall expose saved, duplicate, retryable-conflict, or error status and retain the card when retry is possible.
 - [x] **CHAT-UI-006**: While the workspace is offline, the Ask composer and suggestion-add controls shall be disabled while prior session messages remain readable.
+- [x] **CHAT-UI-007**: When an Ask response contains a place suggestion, the interface shall display generated Apple Maps, Google Maps, and directions actions before the traveler adds it to the trip, and shall display a “Learn more” HTTPS source link when one is present.
 
 ## Optimization Proposals
 
@@ -298,7 +300,7 @@ active gap introduced or changed by the approved conversational design.
 - [ ] **SEC-API-003**: Both browser mutation routes and Action mutation routes shall reject request bodies larger than 64 KiB before parsing application data.
 - [ ] **SEC-API-005**: The Action API shall accept Action and trip credentials only in their approved request headers.
 - [ ] **SEC-API-006**: The trip companion shall not fetch a GPT-supplied place source URL from the server.
-- [x] **SEC-API-007**: The embedded Ask model integration shall configure no tools, web access, or arbitrary outbound URL fetching.
+- [x] **SEC-API-007**: The embedded Ask model integration shall configure only one bounded web-search tool call and shall not configure arbitrary outbound URL fetching or mutation tools.
 - [x] **SEC-UI-001**: The trip companion shall include no analytics or third-party browser scripts in the initial release.
 
 ## Repository Workflow and Deployment
