@@ -1,4 +1,5 @@
 import { catalogAuthConfig } from "@/lib/catalog/auth";
+import { geocodeDestination } from "@/lib/geocoding/open-meteo";
 import {
   createCatalogRepository,
   createMemoryCatalogRepository,
@@ -35,6 +36,7 @@ export function getCatalogService() {
       catalogRepository: createCatalogRepository(),
       tripRepository: productionTripRepository(),
       encryptionKey: config.encryptionKey,
+      geocodeDestination,
     });
   }
   return (developmentState.tripCatalogService ??= createCatalogService({
@@ -42,5 +44,6 @@ export function getCatalogService() {
       createMemoryCatalogRepository()),
     tripRepository: getDevelopmentTripRepository(),
     encryptionKey: config.encryptionKey,
+    geocodeDestination,
   }));
 }

@@ -92,6 +92,7 @@ active gap introduced or changed by the approved conversational design.
 ## Private Trip Catalog
 
 - [x] **CAT-DATA-001**: The private catalog shall retain each managed trip's metadata, hash-derived identity, and AES-GCM-encrypted bearer token without persisting the raw token in browser storage or unencrypted registry data.
+- [x] **CAT-DATA-002**: When a catalog trip is created, the system shall best-effort resolve its destination name to coordinates and retain the trip if the external location lookup is unavailable.
 - [x] **CAT-API-001**: When a visitor supplies the configured shared password, the catalog API shall issue a thirty-day HttpOnly SameSite=Lax signed session cookie.
 - [x] **CAT-API-002**: If a catalog request lacks a valid unexpired session, then the catalog API shall return status 401 without reading or returning catalog data.
 - [x] **CAT-API-003**: When an authenticated catalog user creates a valid trip, the system shall persist the trip and catalog record or roll back the trip if catalog registration fails.

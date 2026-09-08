@@ -77,6 +77,36 @@ it("registers, lists, and permanently deletes catalog-created trips", async () =
   expect(await tripRepository.get(tripKeyForToken(SHARE_TOKEN))).toBeNull();
 });
 
+// @spec CAT-DATA-002
+it("adds best-match destination coordinates during catalog creation", async () => {
+  const service = createCatalogService({
+    tripRepository: createMemoryTripRepository(),
+    catalogRepository: createMemoryCatalogRepository(),
+    encryptionKey,
+    clock: () => NOW,
+    tokenFactory: () => SHARE_TOKEN,
+    geocodeDestination: async () => [
+      {
+        name: "San Diego",
+        locality: "California",
+        countryCode: "US",
+        coordinates: { latitude: 32.7157, longitude: -117.1611 },
+        timeZone: "America/Los_Angeles",
+      },
+    ],
+  });
+
+  const created = await service.create(input);
+
+  expect(created.trip.destination).toEqual({
+    name: "San Diego",
+    locality: "California",
+    countryCode: "US",
+    coordinates: { latitude: 32.7157, longitude: -117.1611 },
+    timeZone: "America/Los_Angeles",
+  });
+});
+
 // @spec CAT-API-005
 it("imports an existing private trip without changing it", async () => {
   const tripRepository = createMemoryTripRepository();

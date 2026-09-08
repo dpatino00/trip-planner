@@ -470,6 +470,48 @@ fieldset {
   background: var(--paper);
   padding: 1rem;
 }
+
+.location-editor {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--paper);
+}
+
+.location-editor h3,
+.location-editor p {
+  margin: 0;
+}
+
+.location-editor h3 {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+}
+
+.location-results {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.location-results button {
+  display: grid;
+  gap: 0.15rem;
+  justify-items: start;
+  text-align: left;
+}
+
+.location-results span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.location-message {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
 .today-title {
   align-items: flex-end;
   margin: 2.8rem 0 1.25rem;

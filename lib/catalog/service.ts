@@ -1,4 +1,5 @@
 import { decryptCatalogToken, encryptCatalogToken } from "@/lib/catalog/crypto";
+import type { GeocodingResult } from "@/lib/geocoding/open-meteo";
 import type {
   CatalogEntry,
   CatalogRepository,
@@ -35,6 +36,7 @@ interface Dependencies {
   clock?: () => Date;
   tokenFactory?: () => string;
   idFactory?: () => string;
+  geocodeDestination?: (name: string) => Promise<GeocodingResult[]>;
 }
 
 function entryFor(
@@ -88,6 +90,7 @@ export function createCatalogService({
   clock = () => new Date(),
   tokenFactory = generateShareToken,
   idFactory = () => crypto.randomUUID(),
+  geocodeDestination,
 }: Dependencies) {
   async function change(
     update: (current: StoredCatalog) => StoredCatalog,
@@ -120,7 +123,26 @@ export function createCatalogService({
 
   return {
     async create(input: unknown) {
-      const trip = createTripDocument(input, clock());
+      let trip = createTripDocument(input, clock());
+      if (geocodeDestination && !trip.destination.coordinates) {
+        try {
+          const [match] = await geocodeDestination(trip.destination.name);
+          if (match) {
+            trip = {
+              ...trip,
+              destination: {
+                ...trip.destination,
+                locality: match.locality,
+                countryCode: match.countryCode,
+                coordinates: match.coordinates,
+                timeZone: match.timeZone,
+              },
+            };
+          }
+        } catch {
+          // Location lookup is best effort; trip creation must remain available.
+        }
+      }
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const token = tokenFactory();
         const stored: StoredTrip = { trip, recentMutationIds: [] };
