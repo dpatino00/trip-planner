@@ -14,6 +14,7 @@ import {
 import { registerServiceWorker } from "@/lib/offline/register-service-worker";
 import { createPlaceMapLinks } from "@/lib/places/links";
 import { rankPlaces } from "@/lib/recommendations/scoring";
+import type { GeocodingResult } from "@/lib/geocoding/open-meteo";
 import type {
   ConditionsEnvelope,
   SavedPlace,
@@ -214,6 +215,13 @@ export function TripWorkspace() {
   const [shareMessage, setShareMessage] = useState("");
   const [chatGptOpen, setChatGptOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [locationQuery, setLocationQuery] = useState<string | null>(null);
+  const [locationResults, setLocationResults] = useState<GeocodingResult[]>([]);
+  const [locationBusy, setLocationBusy] = useState(false);
+  const [destinationLocationMessage, setDestinationLocationMessage] =
+    useState("");
+  const [manualLatitude, setManualLatitude] = useState<string | null>(null);
+  const [manualLongitude, setManualLongitude] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [selectedPlace, setSelectedPlace] = useState<SavedPlace | null>(null);
@@ -482,6 +490,89 @@ export function TripWorkspace() {
   async function refreshTripAfterAsk(tripVersion: number) {
     if (!trip || tripVersion <= trip.version) return;
     await tripState.mutate();
+  }
+
+  async function findDestination() {
+    const query = locationQuery ?? trip?.destination.name ?? "";
+    if (!token || !query.trim()) return;
+    setLocationBusy(true);
+    setDestinationLocationMessage("");
+    setLocationResults([]);
+    try {
+      const response = await fetch(
+        `/api/trip/geocode?query=${encodeURIComponent(query.trim())}`,
+        { headers: { authorization: `Bearer ${token}` }, cache: "no-store" },
+      );
+      const data = (await response.json()) as {
+        results?: GeocodingResult[];
+        error?: { message?: string };
+      };
+      if (!response.ok)
+        throw new Error(data.error?.message ?? "Location search failed");
+      setLocationResults(data.results ?? []);
+      if (!data.results?.length)
+        setDestinationLocationMessage("No matching locations.");
+    } catch (cause) {
+      setDestinationLocationMessage(
+        cause instanceof Error
+          ? cause.message
+          : "Location search is unavailable",
+      );
+    } finally {
+      setLocationBusy(false);
+    }
+  }
+
+  async function saveLocation(result: GeocodingResult) {
+    if (!trip) return;
+    const outcome = await performMutation({
+      type: "set-destination",
+      destination: {
+        ...trip.destination,
+        locality: result.locality,
+        countryCode: result.countryCode,
+        coordinates: result.coordinates,
+        timeZone: result.timeZone,
+      },
+    });
+    if (outcome.status === "saved" || outcome.status === "duplicate") {
+      setLocationResults([]);
+      setDestinationLocationMessage("Destination location saved.");
+      setManualLatitude(String(result.coordinates.latitude));
+      setManualLongitude(String(result.coordinates.longitude));
+    }
+  }
+
+  async function saveManualLocation() {
+    if (!trip) return;
+    const latitude = Number(
+      manualLatitude ?? trip.destination.coordinates?.latitude,
+    );
+    const longitude = Number(
+      manualLongitude ?? trip.destination.coordinates?.longitude,
+    );
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      setDestinationLocationMessage("Enter a valid latitude and longitude.");
+      return;
+    }
+    const outcome = await performMutation({
+      type: "set-destination",
+      destination: {
+        ...trip.destination,
+        coordinates: { latitude, longitude },
+      },
+    });
+    if (outcome.status === "saved" || outcome.status === "duplicate") {
+      setLocationResults([]);
+      setDestinationLocationMessage("Destination location saved.");
+    }
   }
 
   async function commit(mutation: TripMutation) {
@@ -753,6 +844,92 @@ export function TripWorkspace() {
             <p>
               Anyone with this private link can view, edit, and delete the trip.
             </p>
+            <div className="location-editor">
+              <h3>Destination location</h3>
+              <p>
+                Add a location to enable live weather and air-quality details.
+              </p>
+              <label>
+                Search for a place
+                <input
+                  value={locationQuery ?? trip.destination.name}
+                  onChange={(event) => setLocationQuery(event.target.value)}
+                  placeholder="San Diego, CA"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={
+                  locationBusy ||
+                  !(locationQuery ?? trip.destination.name).trim() ||
+                  isOffline
+                }
+                onClick={() => void findDestination()}
+              >
+                {locationBusy ? "Searching…" : "Find location"}
+              </button>
+              {locationResults.length > 0 && (
+                <div className="location-results" aria-label="Location results">
+                  {locationResults.map((result) => (
+                    <button
+                      type="button"
+                      key={`${result.name}-${result.coordinates.latitude}-${result.coordinates.longitude}`}
+                      onClick={() => void saveLocation(result)}
+                      disabled={isOffline || dirty}
+                    >
+                      <strong>{result.name}</strong>
+                      <span>
+                        {[result.locality, result.countryCode]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="field-pair">
+                <label>
+                  Latitude
+                  <input
+                    inputMode="decimal"
+                    value={
+                      manualLatitude ??
+                      (trip.destination.coordinates
+                        ? String(trip.destination.coordinates.latitude)
+                        : "")
+                    }
+                    onChange={(event) => setManualLatitude(event.target.value)}
+                    placeholder="32.7157"
+                  />
+                </label>
+                <label>
+                  Longitude
+                  <input
+                    inputMode="decimal"
+                    value={
+                      manualLongitude ??
+                      (trip.destination.coordinates
+                        ? String(trip.destination.coordinates.longitude)
+                        : "")
+                    }
+                    onChange={(event) => setManualLongitude(event.target.value)}
+                    placeholder="-117.1611"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                disabled={isOffline || dirty}
+                onClick={() => void saveManualLocation()}
+              >
+                Save coordinates
+              </button>
+              {destinationLocationMessage && (
+                <p role="status" className="location-message">
+                  {destinationLocationMessage}
+                </p>
+              )}
+            </div>
             <button
               className="danger"
               ref={deleteTriggerRef}
