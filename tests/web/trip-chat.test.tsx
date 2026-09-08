@@ -401,7 +401,7 @@ it("cancels and confirms a tab-local new chat reset", async () => {
   fireEvent.change(composer, { target: { value: "draft" } });
   fireEvent.click(newChat);
   await waitFor(() =>
-    expect(screen.getByText("Where should we start?")).toBeVisible(),
+    expect(screen.getByText("What do you need help with?")).toBeVisible(),
   );
   expect(screen.queryByText("Try this coastal stop.")).not.toBeInTheDocument();
   expect(screen.queryByText("Garage Kitchen + Bar")).not.toBeInTheDocument();

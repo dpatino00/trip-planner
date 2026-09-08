@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { tripCopy } from "@/lib/ui/copy";
+
 const tokenPattern = /^[A-Za-z0-9_-]{22}$/;
 
 export function TripEntry() {
@@ -32,8 +34,8 @@ export function TripEntry() {
   return (
     <main className="landing-shell">
       <section className="landing-copy">
-        <p className="eyebrow">PRIVATE SHARED TRIPS</p>
-        <h1>Keep every trip in one trusted place.</h1>
+        <p className="eyebrow">{tripCopy.entry.eyebrow}</p>
+        <h1>{tripCopy.entry.heading}</h1>
         <p className="lede">
           Sign in to your private catalog to create, find, share, or remove a
           trip. A private trip link still opens directly for collaborators.

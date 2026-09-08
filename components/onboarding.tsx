@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { tripCopy } from "@/lib/ui/copy";
+
 // @spec TRIP-UI-001, TRIP-UI-002, TRIP-UI-003
 interface OnboardingProps {
   endpoint?: string;
@@ -73,8 +75,8 @@ export function Onboarding({
   return (
     <main className="landing-shell">
       <section className="landing-copy">
-        <p className="eyebrow">ONE CONVERSATION · ONE SHARED PLAN</p>
-        <h1>Dream it up. We’ll keep the plan tidy.</h1>
+        <p className="eyebrow">{tripCopy.onboarding.eyebrow}</p>
+        <h1>{tripCopy.onboarding.heading}</h1>
         <p className="lede">
           Save discoveries from any conversation, see what fits today, and shape
           a flexible itinerary together.
@@ -91,7 +93,7 @@ export function Onboarding({
         )}
       </section>
       <form className="setup-card" onSubmit={submit}>
-        <h2>Start your trip</h2>
+        <h2>{tripCopy.onboarding.formHeading}</h2>
         <label>
           Trip title
           <input

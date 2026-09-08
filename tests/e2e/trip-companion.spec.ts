@@ -194,7 +194,7 @@ test("finds an explicitly requested saved place without changing the trip", asyn
     .getByRole("button", { name: "View Oscar's Mexican Seafood in Ideas" })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Ideas worth keeping close" }),
+    page.getByRole("heading", { name: "Ideas for the trip" }),
   ).toBeVisible();
   await expect(
     page.getByRole("article", { name: "Oscar's Mexican Seafood" }),
@@ -423,7 +423,7 @@ test("labels degraded, advisory, and out-of-range condition states", async ({
     }),
   );
   await page.getByLabel("Recommendation date").fill("2026-12-20");
-  await expect(page.getByText(/refresh closer to.*date/i)).toBeVisible();
+  await expect(page.getByText(/check again closer.*date/i)).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Trip" })).toBeVisible();
 });
 
@@ -472,6 +472,31 @@ test("shows six explained recommendations without a false live claim", async ({
     expect(reasonCount).toBeGreaterThan(0);
     expect(reasonCount).toBeLessThanOrEqual(3);
   }
+});
+
+// @spec APP-UI-010, APP-UI-011, REC-UI-001, REC-UI-004, REC-UI-006
+test("uses direct Spanglish copy without changing Ask or trip data", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend();
+  const original = structuredClone(backend.getTrip());
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+
+  await expect(
+    page.getByRole("heading", { name: "¿Qué hacemos hoy?" }),
+  ).toBeVisible();
+  await expect(page.getByText("Your trip at a glance")).toBeVisible();
+  await expect(page.getByText("Hoy / Today")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "A fresh page for the day" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("link", { name: "Ask" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Ask about San Diego" }),
+  ).toBeVisible();
+  expect(backend.getTrip()).toEqual(original);
 });
 
 // @spec REC-UI-001, REC-UI-004
@@ -525,7 +550,7 @@ test("optimistically favorites a place and exposes all card actions", async ({
   await expect(card.getByRole("link", { name: /maps/i }).first()).toBeVisible();
 });
 
-// @spec PLAN-UI-001, PLAN-UI-002, PLAN-UI-003
+// @spec PLAN-UI-001, PLAN-UI-002, PLAN-UI-003, PLAN-UI-011
 test("shows every trip day with today and empty-day guidance", async ({
   page,
 }) => {
@@ -533,11 +558,16 @@ test("shows every trip day with today and empty-day guidance", async ({
   await page.goto(`/trip#${SHARE_TOKEN}`);
   await page.getByRole("link", { name: "Plan" }).click();
   await expect(page.getByTestId("itinerary-day")).toHaveCount(5);
+  await expect(
+    page.getByRole("heading", { name: "Your plan, day by day." }),
+  ).toBeVisible();
   await expect(page.getByText(/Sep 15.*Today/i)).toBeVisible();
-  await expect(page.getByText(/add a saved place/i)).toBeVisible();
+  await expect(
+    page.getByText("Nothing here yet. Pick an idea to add."),
+  ).toHaveCount(5);
 });
 
-// @spec OPT-UI-001, OPT-UI-002, OPT-UI-003
+// @spec OPT-UI-001, OPT-UI-002, OPT-UI-003, PLAN-UI-011
 test("shows reviewable proposal controls and blocks stale application", async ({
   page,
 }) => {
@@ -565,19 +595,17 @@ test("shows reviewable proposal controls and blocks stale application", async ({
   await expect(page.getByText(proposal.summary)).toBeVisible();
   await expect(page.getByText(proposal.changes[0].rationale)).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Apply proposal" }),
+    page.getByRole("button", { name: "Apply changes" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Dismiss proposal" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Not now" })).toBeVisible();
 
   api.setTrip(makeTripV2({ version: 2, proposals: [proposal] }));
   await page.reload();
   await page.getByRole("link", { name: "Plan" }).click();
-  await expect(page.getByText(/proposal.*stale|regenerate/i)).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Apply proposal" }),
-  ).toHaveCount(0);
+  await expect(page.getByText(/out of date|make a new one/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Apply changes" })).toHaveCount(
+    0,
+  );
 });
 
 // @spec PLAN-UI-004, PLAN-UI-005

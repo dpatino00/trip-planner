@@ -14,6 +14,7 @@ import {
 import { registerServiceWorker } from "@/lib/offline/register-service-worker";
 import { createPlaceMapLinks } from "@/lib/places/links";
 import { rankPlaces } from "@/lib/recommendations/scoring";
+import { tripCopy } from "@/lib/ui/copy";
 import type { GeocodingResult } from "@/lib/geocoding/open-meteo";
 import type {
   ConditionsEnvelope,
@@ -195,7 +196,7 @@ function PlaceCard({
   );
 }
 
-// @spec TRIP-NAV-001, TRIP-NAV-002, TRIP-NAV-003, APP-UI-001, APP-UI-002
+// @spec TRIP-NAV-001, TRIP-NAV-002, TRIP-NAV-003, APP-UI-001, APP-UI-002, APP-UI-010, APP-UI-011, REC-UI-006, PLAN-UI-011
 export function TripWorkspace() {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
@@ -790,7 +791,9 @@ export function TripWorkspace() {
         <header className="trip-header">
           <div className="trip-header-copy">
             <p className="trip-kicker">
-              <span className="private-pill">Private shared plan</span>
+              <span className="private-pill">
+                {tripCopy.workspace.privateTrip}
+              </span>
               {trip.destination.name}
             </p>
             <h1>{trip.title}</h1>
@@ -944,8 +947,8 @@ export function TripWorkspace() {
           <>
             <div className="today-title clubhouse-title">
               <div>
-                <p className="eyebrow">THE DAILY PULSE</p>
-                <h2>What feels right today?</h2>
+                <p className="eyebrow">{tripCopy.workspace.today.eyebrow}</p>
+                <h2>{tripCopy.workspace.today.heading}</h2>
               </div>
               <button className="location-button" onClick={useLocation}>
                 Use my location
@@ -960,11 +963,13 @@ export function TripWorkspace() {
                 </div>
                 {conditions.status === "unavailable" ? (
                   <div className="condition-unavailable">
-                    <strong>Conditions taking a breather</strong>
+                    <strong>
+                      {tripCopy.workspace.today.unavailableHeading}
+                    </strong>
                     <p>
                       {conditions.reason === "forecast-out-of-range"
-                        ? "Refresh closer to that date."
-                        : "Your saved places and plan are still here."}
+                        ? tripCopy.workspace.today.unavailableOutOfRange
+                        : tripCopy.workspace.today.unavailableFallback}
                     </p>
                   </div>
                 ) : (
@@ -974,7 +979,7 @@ export function TripWorkspace() {
                         {Math.round(conditions.temperatureF ?? 0)}°
                       </strong>
                       <div>
-                        <h3>A fresh page for the day</h3>
+                        <h3>{tripCopy.workspace.today.liveHeading}</h3>
                         <p>
                           {conditions.precipitationProbability ?? "—"}% rain
                         </p>
@@ -1035,8 +1040,10 @@ export function TripWorkspace() {
                 </div>
               </section>
               <aside className="trip-snapshot">
-                <p className="eyebrow">YOUR LITTLE UNIVERSE</p>
-                <h3>A plan that gets better as you talk.</h3>
+                <p className="eyebrow">
+                  {tripCopy.workspace.today.summaryEyebrow}
+                </p>
+                <h3>{tripCopy.workspace.today.summaryHeading}</h3>
                 <div className="snapshot-numbers">
                   <div>
                     <strong>{trip.places.length}</strong>
@@ -1051,8 +1058,10 @@ export function TripWorkspace() {
             </div>
             <div className="section-heading">
               <div>
-                <p className="eyebrow">SIX GOOD DIRECTIONS</p>
-                <h2>Places matching the shape of your day</h2>
+                <p className="eyebrow">
+                  {tripCopy.workspace.today.recommendationsEyebrow}
+                </p>
+                <h2>{tripCopy.workspace.today.recommendationsHeading}</h2>
               </div>
             </div>
             {conditions.status === "unavailable" && (
@@ -1087,10 +1096,7 @@ export function TripWorkspace() {
               })}
             </div>
             {!recommendations.length && (
-              <p>
-                No saved ideas yet. Add a place through your GPT, then come back
-                to see what fits today.
-              </p>
+              <p>{tripCopy.workspace.today.noIdeas}</p>
             )}
           </>
         )}
@@ -1099,8 +1105,8 @@ export function TripWorkspace() {
           <>
             <div className="section-heading">
               <div>
-                <p className="eyebrow">YOUR FINDS</p>
-                <h2>Ideas worth keeping close</h2>
+                <p className="eyebrow">{tripCopy.workspace.ideas.eyebrow}</p>
+                <h2>{tripCopy.workspace.ideas.heading}</h2>
               </div>
             </div>
             <div className="filters">
@@ -1172,13 +1178,15 @@ export function TripWorkspace() {
           <>
             <div className="section-heading">
               <div>
-                <p className="eyebrow">THE SHAPE OF THE TRIP</p>
-                <h2>Loose enough to breathe. Clear enough to follow.</h2>
+                <p className="eyebrow">{tripCopy.workspace.plan.eyebrow}</p>
+                <h2>{tripCopy.workspace.plan.heading}</h2>
               </div>
             </div>
             {pendingProposal && (
               <section className="trip-snapshot" aria-label="Plan proposal">
-                <p className="eyebrow">A DRAFT FROM YOUR CONVERSATION</p>
+                <p className="eyebrow">
+                  {tripCopy.workspace.plan.proposalEyebrow}
+                </p>
                 <h3>{pendingProposal.summary}</h3>
                 <ul>
                   {pendingProposal.changes.map((change, index) => (
@@ -1196,7 +1204,7 @@ export function TripWorkspace() {
                         })
                       }
                     >
-                      Apply proposal
+                      {tripCopy.workspace.plan.apply}
                     </button>
                     <button
                       onClick={() =>
@@ -1206,13 +1214,11 @@ export function TripWorkspace() {
                         })
                       }
                     >
-                      Dismiss proposal
+                      {tripCopy.workspace.plan.dismiss}
                     </button>
                   </div>
                 ) : (
-                  <p className="caution">
-                    This proposal is stale. Ask ChatGPT to regenerate it.
-                  </p>
+                  <p className="caution">{tripCopy.workspace.plan.stale}</p>
                 )}
               </section>
             )}
@@ -1238,13 +1244,7 @@ export function TripWorkspace() {
                       {dateLabel(date)}
                       {date === today ? " · Today" : ""}
                     </h3>
-                    {!items.length && (
-                      <p>
-                        {date === trip.startDate
-                          ? "Add a saved place when something feels right."
-                          : "Nothing planned yet—choose something from Ideas."}
-                      </p>
-                    )}
+                    {!items.length && <p>{tripCopy.workspace.plan.emptyDay}</p>}
                     <ol>
                       {items.map((item, index) => {
                         const place = placeById.get(item.placeId);

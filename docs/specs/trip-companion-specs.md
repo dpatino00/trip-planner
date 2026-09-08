@@ -315,6 +315,10 @@ active gap introduced or changed by the approved conversational design.
 - [x] **APP-UI-007**: The trip companion shall use a warm sand, deep navy, seafoam, and coral visual system.
 - [x] **APP-UI-008**: When a destructive or validation dialog opens, the system shall move focus into it and return focus to the invoking control when it closes.
 - [x] **APP-UI-009**: Each external link opened by the trip companion shall be protected from opener access and referrer disclosure.
+- [x] **APP-UI-010**: Fixed trip-companion interface copy shall use direct, warm, mostly-English Spanglish while preserving unambiguous English labels for primary actions, privacy warnings, errors, and form controls.
+- [x] **APP-UI-011**: The static-copy voice change shall not alter user-entered text, place names, source text, API data, navigation URLs, or model-generated Ask responses.
+- [x] **REC-UI-006**: The Today view shall present a direct selected-day heading, plain condition availability guidance, recommendation context, and counts of saved ideas and planned stops without aspirational travel-marketing copy.
+- [x] **PLAN-UI-011**: The Plan view shall introduce the itinerary as a day-by-day plan, label pending optimizer output as suggested changes, and provide concise guidance for each empty itinerary day to select an existing idea.
 
 ## PWA and Offline Behavior
 
