@@ -75,6 +75,17 @@ export async function chatSessionStorageKey(token: string) {
   return `trip-chat:v3:${await tokenHash(token)}`;
 }
 
+export async function clearChatSession(token: string) {
+  try {
+    const hash = await tokenHash(token);
+    sessionStorage.removeItem(`trip-chat:v3:${hash}`);
+    sessionStorage.removeItem(`trip-chat:v1:${hash}`);
+    sessionStorage.removeItem(`trip-chat:v2:${hash}`);
+  } catch {
+    // Session persistence is best effort.
+  }
+}
+
 // @spec CHAT-DATA-004, CHAT-DATA-008, SEC-DATA-007
 export async function saveChatSession(
   token: string,

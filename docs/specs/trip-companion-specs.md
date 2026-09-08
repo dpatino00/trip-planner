@@ -60,7 +60,7 @@ active gap introduced or changed by the approved conversational design.
 - [ ] **TRIP-DATA-016**: If a schema-version-one place reference cannot be migrated, then the system shall retain an unavailable placeholder rather than discard the itinerary entry.
 - [ ] **TRIP-DATA-017**: Each shared trip shall have an inclusive date range of 1–31 days.
 - [ ] **TRIP-DATA-018**: Each shared trip shall have a destination name containing 1–120 characters.
-- [ ] **TRIP-API-001**: When a valid destination-neutral trip-creation request is received, the browser trip API shall return status 201 with a new share token and schema-version-two trip.
+- [ ] **TRIP-API-001**: When a valid destination-neutral trip-creation request is received through an authenticated private catalog, the system shall return status 201 with a new share token and schema-version-two trip.
 - [ ] **TRIP-API-002**: When a valid share token identifies an unexpired trip, the browser trip API shall return status 200 with the current schema-version-two trip.
 - [ ] **TRIP-API-003**: When a valid browser semantic mutation targets the current trip version, the browser trip API shall return status 200 with the updated trip.
 - [x] **TRIP-API-004**: When a valid deletion confirmation targets an existing shared trip, the browser trip API shall permanently delete it and return status 204.
@@ -69,7 +69,6 @@ active gap introduced or changed by the approved conversational design.
 - [ ] **TRIP-API-007**: If a browser trip request contains an invalid body, unknown field, or unresolved embedded-place reference, then the browser trip API shall return status 400 with a non-retryable error.
 - [x] **TRIP-API-008**: The browser trip API shall mark every response as non-cacheable by shared and browser HTTP caches.
 - [x] **TRIP-API-009**: If trip storage is unavailable, then the browser trip API shall return status 503 with a retryable error.
-- [x] **TRIP-API-010**: If one hashed client address creates more than 10 trips within one hour, then the browser trip API shall reject subsequent creations with status 429 until that window expires.
 - [x] **TRIP-API-011**: If one hashed token-and-client pair reads a trip more than 120 times within one minute, then the browser trip API shall reject subsequent reads with status 429 until that window expires.
 - [x] **TRIP-API-012**: If one hashed token-and-client pair mutates a trip more than 60 times within one minute, then the browser trip API shall reject subsequent mutations with status 429 until that window expires.
 - [x] **TRIP-BE-001**: When the system creates a shared trip, it shall generate a URL-safe token containing 128 bits of cryptographic randomness.
@@ -80,15 +79,31 @@ active gap introduced or changed by the approved conversational design.
 - [x] **TRIP-BE-006**: When the browser receives its first version conflict for a semantic mutation, it shall reapply that mutation to the latest trip and retry once.
 - [x] **TRIP-BE-007**: If the retried browser mutation conflicts again, then the browser shall preserve the user's draft and require a refresh before another submission.
 - [x] **TRIP-BE-008**: When a shared trip adds an existing favorite or removes an absent favorite, the operation shall succeed without duplicating or failing the favorite state.
-- [x] **TRIP-UI-001**: Before creating a shared trip, the onboarding interface shall explain that anyone holding its private link can view, edit, and delete the trip.
+- [x] **TRIP-UI-001**: Before creating a shared trip through the private catalog, the onboarding interface shall explain that anyone holding its private link can view, edit, and delete the trip.
 - [ ] **TRIP-UI-002**: The destination-neutral onboarding interface shall collect a trip title, date range, destination name, preferences, and optional home base.
-- [x] **TRIP-UI-003**: When a shared trip is successfully created, the system shall navigate to `/trip` with the share token in the URL fragment.
+- [x] **TRIP-UI-003**: When a shared trip is successfully created through the private catalog, the system shall navigate to `/trip` with the share token in the URL fragment.
 - [x] **TRIP-UI-004**: When a user shares a trip, the system shall use native device sharing when available and otherwise provide a clipboard-copy action.
 - [ ] **TRIP-UI-005**: The shared-trip interface shall provide a “Copy link for ChatGPT” action that copies the existing private trip link.
 - [x] **TRIP-UI-006**: Before deleting a shared trip, the system shall require confirmation that deletion is permanent for everyone holding the link.
 - [ ] **TRIP-UI-007**: Before copying a private trip link for ChatGPT, the system shall explain that anyone holding the link can edit the trip.
 - [x] **TRIP-NAV-001**: When `/trip` loads with a valid share-token fragment, the browser shall authenticate trip API requests with that fragment only after hydration.
-- [x] **TRIP-NAV-002**: If `/trip` loads without a valid share-token fragment, then the browser shall avoid a trip API request and display actions to paste a complete link or create a trip.
+- [x] **TRIP-NAV-002**: If `/trip` loads without a valid share-token fragment, then the browser shall avoid a trip API request and display actions to paste a complete link or open the private catalog.
+
+## Private Trip Catalog
+
+- [x] **CAT-DATA-001**: The private catalog shall retain each managed trip's metadata, hash-derived identity, and AES-GCM-encrypted bearer token without persisting the raw token in browser storage or unencrypted registry data.
+- [x] **CAT-API-001**: When a visitor supplies the configured shared password, the catalog API shall issue a thirty-day HttpOnly SameSite=Lax signed session cookie.
+- [x] **CAT-API-002**: If a catalog request lacks a valid unexpired session, then the catalog API shall return status 401 without reading or returning catalog data.
+- [x] **CAT-API-003**: When an authenticated catalog user creates a valid trip, the system shall persist the trip and catalog record or roll back the trip if catalog registration fails.
+- [x] **CAT-API-004**: When an authenticated catalog user confirms deletion by submitting `DELETE`, the system shall permanently delete the selected trip and its catalog record.
+- [x] **CAT-API-005**: When an authenticated catalog user imports a valid private link for an existing unexpired trip, the system shall register its current metadata without duplicating or mutating the trip.
+- [x] **CAT-BE-001**: The private catalog shall list every record created through the catalog in newest-updated order and identify expired records.
+- [x] **CAT-BE-002**: When a private-link trip deletion succeeds, the system shall remove its matching catalog record without blocking the completed deletion if catalog cleanup is unavailable.
+- [x] **CAT-BE-003**: The public browser trip API shall reject direct trip-creation requests and preserve bearer-token read, mutation, and deletion behavior.
+- [x] **CAT-BE-004**: If a catalog record cannot be decrypted with the configured key, then the catalog shall keep it visible without open or copy actions and shall allow its trip and registry data to be deleted by hash-derived identity.
+- [x] **CAT-SEC-001**: The catalog password, session secret, and encryption key shall be server-only runtime configuration and shall fail closed when absent.
+- [x] **CAT-SEC-002**: The catalog session cookie shall be HttpOnly, SameSite=Lax, signed, and Secure in production.
+- [x] **CAT-SEC-003**: The catalog shall decrypt a stored bearer token only in server memory to fulfill an authenticated catalog request or deletion.
 - [x] **TRIP-NAV-003**: If a shared trip is missing or expired, then the browser shall clear its matching local snapshot and display a recoverable not-found state.
 
 ## Custom GPT Actions
@@ -131,6 +146,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-DATA-006**: The embedded Ask model response shall contain no more than twelve unique saved-place source candidates, each pairing a saved-place ID with an HTTPS source URL.
 - [x] **CHAT-DATA-007**: Each unresolved place name in an embedded Ask response shall contain 1–120 characters and shall be unique under normalized name comparison.
 - [x] **CHAT-DATA-008**: The embedded Ask model history shall contain no more than eight role-and-text-only messages of no more than 2,000 characters each and 8,000 characters combined, excluding stored saved-place IDs, suggestions, and unresolved place names.
+- [x] **CHAT-DATA-009**: When a traveler confirms starting a new Ask chat, the browser shall remove only the current trip's version-3 session entry and same-token legacy entries, without changing shared trip data or another trip's session entry.
 - [x] **CHAT-API-001**: When the version-3 embedded Ask API receives a valid bearer token, a 1–8,000 character message, and no more than eight bounded history messages, the system shall load the authoritative trip and return a no-store validated Ask response.
 - [x] **CHAT-API-002**: If the embedded Ask API receives missing or malformed bearer authentication, then the system shall return status 401 before reading trip storage.
 - [x] **CHAT-API-003**: If the embedded Ask API receives an unknown or expired trip token, then the system shall return status 404.
@@ -188,6 +204,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-UI-012**: When an Ask response contains more than one unsaved new-place suggestion, the interface shall offer an “Add all new” action while preserving each card's individual add and dismiss actions.
 - [x] **CHAT-UI-013**: While a bulk add is pending, the interface shall disable affected add controls, and after completion it shall show saved or duplicate status per submitted card while retaining retryable cards after a failure or repeated conflict.
 - [x] **CHAT-UI-014**: When an Ask response contains unresolved place names, the interface shall identify them as needing clarification and shall provide no mutation control for them.
+- [x] **CHAT-UI-015**: When Ask history exists, the interface shall provide a New chat control that is disabled during hydration or generation; after confirmation it shall clear rendered messages, composer text, errors, and suggestion statuses and return to the empty-state prompt, while canceling preserves the conversation.
 
 ## Optimization Proposals
 

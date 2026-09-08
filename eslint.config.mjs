@@ -6,7 +6,9 @@ export default defineConfig([
   globalIgnores([
     ".next/**",
     ".pixi/**",
+    "playwright-report/**",
     "public/sw-prod.js",
     "public/sw-prod.js.map",
+    "test-results/**",
   ]),
 ]);

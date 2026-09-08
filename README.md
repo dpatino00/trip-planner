@@ -22,5 +22,11 @@ supports Responses API Structured Outputs and web search, such as
 storage and rate limits require `UPSTASH_REDIS_REST_URL` and
 `UPSTASH_REDIS_REST_TOKEN`.
 
+The private trip catalog additionally requires server-only
+`TRIP_CATALOG_PASSWORD`, `TRIP_CATALOG_SESSION_SECRET`, and a 32-byte base64url
+`TRIP_CATALOG_ENCRYPTION_KEY`. Create trips through `/trips`; private `/trip#…`
+links remain usable by anyone holding that link. Existing trips in the same
+database can be added to the catalog by importing their private links once.
+
 The private Custom GPT Action client is optional. Enable it with a 32-byte-or-
 longer `TRIP_GPT_ACTION_KEY` and the server-bound `TRIP_GPT_TRIP_TOKEN`.

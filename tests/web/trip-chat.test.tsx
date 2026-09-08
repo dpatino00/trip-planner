@@ -9,7 +9,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 
 import { buildChatHistory, TripChat } from "@/components/chat/trip-chat";
-import { saveChatSession } from "@/lib/chat/session";
+import { chatSessionStorageKey, saveChatSession } from "@/lib/chat/session";
 import { makeTripV2, SHARE_TOKEN } from "./fixtures";
 
 const suggestion = {
@@ -356,4 +356,96 @@ it("renders a batch, explains unresolved names, and adds all new cards together"
       headers: expect.objectContaining({ "x-trip-chat-contract": "3" }),
     }),
   );
+});
+
+// @spec CHAT-UI-015
+it("cancels and confirms a tab-local new chat reset", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({
+      message: "Try this coastal stop.",
+      savedPlaceIds: [],
+      suggestions: [suggestion],
+      unresolvedPlaceNames: ["Garage Kitchen + Bar"],
+      tripVersion: 1,
+    }),
+  );
+  const confirmMock = vi
+    .spyOn(window, "confirm")
+    .mockReturnValueOnce(false)
+    .mockReturnValueOnce(true);
+  const onAddSuggestion = vi.fn().mockResolvedValue({ status: "saved" });
+  render(
+    <TripChat
+      token={SHARE_TOKEN}
+      trip={makeTripV2()}
+      online
+      onAddSuggestion={onAddSuggestion}
+      onViewSavedPlace={vi.fn()}
+    />,
+  );
+
+  const composer = screen.getByLabelText("Ask about this trip");
+  await waitFor(() => expect(composer).toBeEnabled());
+  fireEvent.change(composer, { target: { value: "Suggest a place" } });
+  fireEvent.keyDown(composer, { key: "Enter" });
+  expect(await screen.findByText("Try this coastal stop.")).toBeVisible();
+  const newChat = screen.getByRole("button", { name: "New chat" });
+  expect(newChat).toBeEnabled();
+
+  fireEvent.click(newChat);
+  expect(screen.getByText("Try this coastal stop.")).toBeVisible();
+  expect(confirmMock).toHaveBeenCalledWith(
+    "Start a new chat? This clears Ask history in this browser tab only.",
+  );
+
+  fireEvent.change(composer, { target: { value: "draft" } });
+  fireEvent.click(newChat);
+  await waitFor(() =>
+    expect(screen.getByText("Where should we start?")).toBeVisible(),
+  );
+  expect(screen.queryByText("Try this coastal stop.")).not.toBeInTheDocument();
+  expect(screen.queryByText("Garage Kitchen + Bar")).not.toBeInTheDocument();
+  expect(composer).toHaveValue("");
+  expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled();
+  expect(
+    sessionStorage.getItem(await chatSessionStorageKey(SHARE_TOKEN)),
+  ).toBeNull();
+  expect(onAddSuggestion).not.toHaveBeenCalled();
+});
+
+// @spec CHAT-UI-015
+it("disables New chat while a request is in flight", async () => {
+  let resolveFetch!: (response: Response) => void;
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    () =>
+      new Promise<Response>((resolve) => {
+        resolveFetch = (response) => resolve(response);
+      }),
+  );
+  render(
+    <TripChat
+      token={SHARE_TOKEN}
+      trip={makeTripV2()}
+      online
+      onAddSuggestion={vi.fn()}
+      onViewSavedPlace={vi.fn()}
+    />,
+  );
+  const composer = screen.getByLabelText("Ask about this trip");
+  await waitFor(() => expect(composer).toBeEnabled());
+  fireEvent.change(composer, { target: { value: "What should we do?" } });
+  fireEvent.keyDown(composer, { key: "Enter" });
+
+  expect(await screen.findByText("Thinking through your trip…")).toBeVisible();
+  expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled();
+  resolveFetch(
+    Response.json({
+      message: "Done",
+      savedPlaceIds: [],
+      suggestions: [],
+      unresolvedPlaceNames: [],
+      tripVersion: 1,
+    }),
+  );
+  await waitFor(() => expect(screen.getByText("Done")).toBeVisible());
 });

@@ -4,7 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 // @spec TRIP-UI-001, TRIP-UI-002, TRIP-UI-003
-export function Onboarding() {
+interface OnboardingProps {
+  endpoint?: string;
+  onCreated?: (token: string) => void;
+}
+
+export function Onboarding({
+  endpoint = "/api/trip",
+  onCreated,
+}: OnboardingProps) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -29,7 +37,7 @@ export function Onboarding() {
       notes: form.get("notes") ?? "",
     };
     try {
-      const response = await fetch("/api/trip", {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -52,7 +60,8 @@ export function Onboarding() {
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.error?.message || "Could not create the trip");
-      router.push(`/trip#${data.token}`);
+      if (onCreated) onCreated(data.token);
+      else router.push(`/trip#${data.token}`);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Could not create the trip",

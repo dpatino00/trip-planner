@@ -257,12 +257,13 @@ test("automatically adds and renders a verified source for an unsourced saved ma
   expect(changed.proposals).toEqual([]);
 });
 
-// @spec TRIP-UI-001, TRIP-UI-002, TRIP-UI-003
-test("creates a trip after explaining the private link model", async ({
-  page,
-}) => {
+// @spec TRIP-UI-001, TRIP-UI-002, TRIP-UI-003, CAT-API-001, CAT-API-003
+test("creates a trip from the private catalog", async ({ page }) => {
   await mockTripApi(page);
-  await page.goto("/");
+  await page.goto("/trips");
+  await page.getByLabel("Shared password").fill("e2e catalog password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Create trip" }).click();
   await expect(
     page.getByText(/anyone with.*link.*edit.*delete/i),
   ).toBeVisible();
@@ -274,7 +275,7 @@ test("creates a trip after explaining the private link model", async ({
   await page.getByLabel("Food").check();
   await page.getByLabel("Pace").selectOption("balanced");
   await page.getByRole("button", { name: "Create trip" }).click();
-  await expect(page).toHaveURL(new RegExp(`/trip#${SHARE_TOKEN}$`));
+  await expect(page).toHaveURL(/\/trip#[A-Za-z0-9_-]{22}$/);
 });
 
 // @spec TRIP-UI-004
