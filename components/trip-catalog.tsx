@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Onboarding } from "@/components/onboarding";
+import { tripCopy } from "@/lib/ui/copy";
 
 interface CatalogTrip {
   id: string;
@@ -145,8 +146,8 @@ export function TripCatalog() {
     return (
       <main className="landing-shell">
         <section className="landing-copy">
-          <p className="eyebrow">PRIVATE TRIP CATALOG</p>
-          <h1>Your shared trips, in one place.</h1>
+          <p className="eyebrow">{tripCopy.entry.eyebrow}</p>
+          <h1>{tripCopy.entry.heading}</h1>
           <p className="lede">
             Sign in with the shared password to manage trips.
           </p>
@@ -194,7 +195,7 @@ export function TripCatalog() {
     <main className="catalog-shell">
       <header className="catalog-header">
         <div>
-          <p className="eyebrow">PRIVATE TRIP CATALOG</p>
+          <p className="eyebrow">{tripCopy.entry.eyebrow}</p>
           <h1>Your trips</h1>
           <p className="lede">
             Open, copy, or permanently remove every trip created here.

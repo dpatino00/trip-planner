@@ -11,6 +11,7 @@ import {
   type ChatSessionMessage,
 } from "@/lib/chat/session";
 import { tripChatResponseSchema } from "@/lib/chat/schema";
+import { tripCopy } from "@/lib/ui/copy";
 import type { SuggestedPlace, TripDocument } from "@/lib/types";
 
 export interface AddSuggestionResult {
@@ -237,11 +238,9 @@ export function TripChat({
     <section className="trip-chat" aria-labelledby="ask-title">
       <div className="section-heading ask-heading">
         <div>
-          <p className="eyebrow">A SOUNDING BOARD FOR YOUR TRIP</p>
+          <p className="eyebrow">{tripCopy.workspace.chat.eyebrow}</p>
           <h2 id="ask-title">Ask about {trip.destination.name}</h2>
-          <p className="section-intro">
-            Suggestions stay private to this tab until you choose Add to trip.
-          </p>
+          <p className="section-intro">{tripCopy.workspace.chat.intro}</p>
         </div>
         <button
           type="button"
@@ -255,11 +254,8 @@ export function TripChat({
       <div className="chat-thread" aria-live="polite">
         {messages.length === 0 ? (
           <div className="chat-empty">
-            <h3>Where should we start?</h3>
-            <p>
-              Ask what fits today, compare saved ideas, or get help shaping your
-              plan.
-            </p>
+            <h3>{tripCopy.workspace.chat.emptyHeading}</h3>
+            <p>{tripCopy.workspace.chat.emptyBody}</p>
           </div>
         ) : null}
         {messages.map((message) => (
