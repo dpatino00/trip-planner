@@ -154,6 +154,22 @@ The `origin` field describes how a place entered the trip, not whether its detai
 are authoritative. There is no required image field. Existing local artwork may
 remain as generic decoration, but saved-place rendering cannot depend on it.
 
+### Private trip catalog
+
+Trip creation occurs only through the `/trips` catalog after shared-password
+authentication. The catalog session is a thirty-day HttpOnly, SameSite=Lax
+cookie signed from server-only configuration. The registry stores each trip's
+metadata and an AES-GCM encrypted copy of its bearer token; raw token storage,
+browser persistence, logs, and public route paths are prohibited. Catalog users
+can list active and expired records, open or copy a private link, and type
+`DELETE` to permanently remove both records. Existing `/trip#token` links stay
+accessible to a trusted holder and direct deletion removes the matching catalog
+record on a best-effort basis. Existing trips in the same Redis database can be
+registered by pasting a known private link; importing reads metadata without
+duplicating or mutating the trip. Records encrypted with another key remain
+visible and deletable by their hash-derived storage identity, but must be
+re-imported before their private link can be opened or copied.
+
 ### Shared trip and itinerary
 
 ```ts
@@ -598,6 +614,13 @@ Version-1 and version-2 ephemeral chat data is discarded rather than migrated,
 so stale three-item schemas cannot reject batch results. Card data is never sent
 back as model history. The exact trip token is removed before persistence and is
 rejected if submitted to the server.
+
+Ask also provides a browser-tab-local **New chat** action. After native
+confirmation, it removes the current trip's version-3 entry (and same-token
+legacy entries), clears the visible composer, messages, errors, and suggestion
+statuses, and returns to the empty state. Hydration and generation disable the
+action. The action never writes shared trip data or another trip's session
+entry; canceling confirmation leaves the conversation unchanged.
 
 Dismissing a suggestion is session-local and performs no mutation. Individual
 and bulk addition use conflict reconciliation, update SWR and the IndexedDB

@@ -51,6 +51,8 @@ authenticated Actions as an optional secondary client.
   preferences, place coordinates, and optional on-device proximity.
 - Let a trusted travel group share favorites and a day-by-day itinerary without
   creating accounts.
+- Give the two trusted owners a password-protected catalog for creating,
+  finding, copying, and deleting managed trips without exposing the trip list.
 - Give every saved place and Ask suggestion useful Apple Maps, Google Maps, and
   Google Maps directions links generated from its name, locality, and available
   coordinates; preserve a supplied source URL when present. Place imagery is
@@ -77,6 +79,8 @@ authenticated Actions as an optional secondary client.
 - Building a persistent job queue or autonomous agent loop; initial optimization
   runs as part of relevant API mutations and stores a proposal for review.
 - User accounts, roles, or identity-provider integration.
+- A public trip directory or a password requirement for holders of an existing
+  private trip link.
 - Live business hours, event listings, reservation availability, booking, or
   traffic-aware route optimization.
 - An embedded interactive map or turn-by-turn navigation.
@@ -106,7 +110,7 @@ prevent the place from being saved.
 ```text
 ┌──────────────────────┐       ┌──────────────────────────────┐
 │ Private Custom GPT   │       │ Next.js progressive web app │
-│ optional Actions     │       │ Today · Ideas · Plan · Ask  │
+│ optional Actions     │       │ Catalog · Today · Ideas · Plan · Ask │
 └──────────┬───────────┘       └──────────────┬───────────────┘
            │ GPT Action HTTPS                 │ same-origin HTTPS
            │ OpenAPI + action API key         │
@@ -124,7 +128,7 @@ prevent the place from being saved.
     ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
     │ Upstash Redis    │  │ Open-Meteo APIs  │  │ External place   │
     │ shared trip JSON │  │ weather · air ·  │  │ and Maps links   │
-    │ + proposals      │  │ marine           │  │ OpenAI Responses │
+    │ + catalog        │  │ marine           │  │ OpenAI Responses │
     └──────────────────┘  └──────────────────┘  └──────────────────┘
 
 Deployment: Pixi task → Vercel CLI → Vercel preview/production
@@ -232,6 +236,7 @@ live, stale, and unavailable data.
 | Keep Pixi as the repository command entrypoint                                | Contributors retain one documented workflow for development, tests, builds, and deployment while Vercel uses its supported npm installation pipeline.                                                      | Requiring direct npm and Vercel commands, attempting to use Pixi as Vercel's package manager.                           |
 | Use a free Upstash Redis integration                                          | A small versioned JSON document fits key-value storage and enables immediate shared reads and writes with minimal operations.                                                                              | Browser-only state, URL-encoded state, Vercel Blob, Postgres.                                                           |
 | Treat one opaque link as the trip credential                                  | A trusted group can collaborate without account or invitation complexity. Keeping the token in the URL fragment reduces accidental disclosure through paths and referrers.                                 | User accounts, separate viewer/editor links, public trip IDs.                                                           |
+| Add a shared-password private catalog                                         | Two trusted owners can manage newly created trips without accounts or a public index. Existing private links remain the collaboration credential.                                                          | Public trip directory, full identity-provider integration.                                                              |
 | Support cached, read-only offline access                                      | Travelers retain essential reference information without introducing ambiguous or conflicting offline writes.                                                                                              | Online-only use, queued offline mutations with background merge.                                                        |
 | Link out to Apple Maps and Google Maps                                        | External navigation is more reliable and avoids map-tile providers, API keys, and a larger client bundle.                                                                                                  | Embedded MapLibre, Google Maps SDK.                                                                                     |
 | Make place imagery optional                                                   | Link-rich text cards work for arbitrary destinations, avoid repetitive imagery, and remove an unnecessary asset pipeline.                                                                                  | Mandatory hosted images, remote hotlinking, generated images for every place.                                           |
