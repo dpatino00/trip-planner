@@ -59,15 +59,17 @@ interface Dependencies {
   clock?: () => Date;
   tokenFactory?: () => string;
   idFactory?: () => string;
+  onTripDeleted?: (token: string) => Promise<void>;
 }
 
-// @spec TRIP-API-001, TRIP-API-002, TRIP-API-003, TRIP-API-004, TRIP-API-005, TRIP-API-006, TRIP-API-007, TRIP-API-008, TRIP-API-009, TRIP-API-010, TRIP-API-011, TRIP-API-012, TRIP-BE-003, TRIP-BE-004, TRIP-BE-005, CHAT-BE-025, CHAT-BE-026, SEC-API-003
+// @spec TRIP-API-001, TRIP-API-002, TRIP-API-003, TRIP-API-004, TRIP-API-005, TRIP-API-006, TRIP-API-007, TRIP-API-008, TRIP-API-009, TRIP-API-011, TRIP-API-012, TRIP-BE-003, TRIP-BE-004, TRIP-BE-005, CHAT-BE-025, CHAT-BE-026, SEC-API-003
 export function createTripHandlers({
   repository,
   rateLimiter,
   clock = () => new Date(),
   tokenFactory = generateShareToken,
   idFactory = () => crypto.randomUUID(),
+  onTripDeleted,
 }: Dependencies) {
   async function authenticate(request: Request) {
     const token = tokenFrom(request);
@@ -305,9 +307,14 @@ export function createTripHandlers({
       )
         return error("invalid-confirmation", "Type DELETE to confirm", 400);
       try {
-        return (await repository.delete(auth.key))
-          ? new Response(null, { status: 204, headers: noStore })
-          : error("trip-not-found", "Trip not found", 404);
+        if (!(await repository.delete(auth.key)))
+          return error("trip-not-found", "Trip not found", 404);
+        try {
+          await onTripDeleted?.(auth.token);
+        } catch {
+          // The trip has already been permanently deleted. Catalog cleanup is best effort.
+        }
+        return new Response(null, { status: 204, headers: noStore });
       } catch {
         return error(
           "storage-unavailable",

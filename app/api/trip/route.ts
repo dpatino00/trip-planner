@@ -1,4 +1,5 @@
 import { createTripHandlers } from "@/lib/trips/handlers";
+import { getCatalogService } from "@/lib/catalog/runtime";
 import { createRateLimiter } from "@/lib/trips/rate-limit";
 import { createTripRepository } from "@/lib/trips/repository";
 import {
@@ -26,9 +27,28 @@ const repository =
 const handlers = createTripHandlers({
   repository,
   rateLimiter: createRateLimiter(),
+  onTripDeleted: async (token) => {
+    try {
+      await getCatalogService().removeByToken(token);
+    } catch {
+      // Direct-link deletion must remain available if the optional catalog is unavailable.
+    }
+  },
 });
 
-export const POST = handlers.POST;
+// @spec CAT-API-003
+export function POST() {
+  return Response.json(
+    {
+      error: {
+        code: "catalog-sign-in-required",
+        message: "Create trips from your private trip catalog",
+        retryable: false,
+      },
+    },
+    { status: 403, headers: { "cache-control": "no-store" } },
+  );
+}
 export const GET = handlers.GET;
 export const PATCH = handlers.PATCH;
 export const DELETE = handlers.DELETE;

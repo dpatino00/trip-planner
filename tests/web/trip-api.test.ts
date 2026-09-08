@@ -175,7 +175,6 @@ it("returns retryable 503 when storage fails", async () => {
   expect((await response.json()).error.retryable).toBe(true);
 });
 
-// @spec TRIP-API-010
 it("limits trip creation to ten requests per IP per hour", async () => {
   let tokenIndex = 0;
   const { handlers } = setup(() => String(tokenIndex++).padStart(22, "A"));

@@ -9,7 +9,7 @@ export interface RateLimiter {
   ): Promise<boolean>;
 }
 
-// @spec TRIP-API-010, TRIP-API-011, TRIP-API-012, COND-API-012, SEC-DATA-004
+// @spec TRIP-API-011, TRIP-API-012, COND-API-012, SEC-DATA-004
 export function createMemoryRateLimiter(): RateLimiter {
   const entries = new Map<string, { count: number; expires: number }>();
   return {
