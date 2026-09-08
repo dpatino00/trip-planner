@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 
 import {
   chatSessionStorageKey,
+  clearChatSession,
   loadChatSession,
   saveChatSession,
 } from "@/lib/chat/session";
@@ -60,4 +61,20 @@ it("discards version-1 and version-2 ephemeral chat history", async () => {
 
   expect(await loadChatSession(SHARE_TOKEN)).toEqual([]);
   for (const key of oldKeys) expect(sessionStorage.getItem(key)).toBeNull();
+});
+
+// @spec CHAT-DATA-009
+it("clears only the selected trip's chat session", async () => {
+  const otherToken = `${SHARE_TOKEN}-other`;
+  await saveChatSession(SHARE_TOKEN, []);
+  await saveChatSession(otherToken, []);
+
+  await clearChatSession(SHARE_TOKEN);
+
+  expect(
+    sessionStorage.getItem(await chatSessionStorageKey(SHARE_TOKEN)),
+  ).toBeNull();
+  expect(
+    sessionStorage.getItem(await chatSessionStorageKey(otherToken)),
+  ).not.toBeNull();
 });

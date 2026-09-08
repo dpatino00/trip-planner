@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChatMessage } from "@/components/chat/chat-message";
 import type { SuggestionStatus } from "@/components/chat/suggestion-card";
 import {
+  clearChatSession,
   loadChatSession,
   saveChatSession,
   type ChatSessionMessage,
@@ -68,6 +69,7 @@ export function TripChat({
     {},
   );
   const [hydrated, setHydrated] = useState(false);
+  const skipNextSave = useRef(false);
   const placeById = useMemo(
     () => new Map(trip.places.map((place) => [place.id, place])),
     [trip.places],
@@ -87,7 +89,12 @@ export function TripChat({
   }, [token]);
 
   useEffect(() => {
-    if (hydrated) void saveChatSession(token, messages);
+    if (!hydrated) return;
+    if (skipNextSave.current) {
+      skipNextSave.current = false;
+      return;
+    }
+    void saveChatSession(token, messages);
   }, [hydrated, messages, token]);
 
   async function submit() {
@@ -209,6 +216,23 @@ export function TripChat({
     );
   }
 
+  async function startNewChat() {
+    if (!hydrated || loading || messages.length === 0) return;
+    if (
+      !window.confirm(
+        "Start a new chat? This clears Ask history in this browser tab only.",
+      )
+    ) {
+      return;
+    }
+    await clearChatSession(token);
+    skipNextSave.current = true;
+    setMessages([]);
+    setComposer("");
+    setError("");
+    setStatuses({});
+  }
+
   return (
     <section className="trip-chat" aria-labelledby="ask-title">
       <div className="section-heading ask-heading">
@@ -219,6 +243,14 @@ export function TripChat({
             Suggestions stay private to this tab until you choose Add to trip.
           </p>
         </div>
+        <button
+          type="button"
+          aria-label="New chat"
+          disabled={!hydrated || loading || messages.length === 0}
+          onClick={() => void startNewChat()}
+        >
+          New chat
+        </button>
       </div>
       <div className="chat-thread" aria-live="polite">
         {messages.length === 0 ? (
