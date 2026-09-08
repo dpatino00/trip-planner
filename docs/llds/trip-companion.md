@@ -1,7 +1,7 @@
 # Conversational Trip Companion — Low-Level Design
 
 **Created**: 2026-09-01
-**Last updated**: 2026-09-06
+**Last updated**: 2026-09-07
 **Related HLD**: [Conversational Trip Companion — High-Level Design](../high-level-design.md)
 
 ## Context and Design Philosophy
@@ -690,8 +690,22 @@ status or personal safety.
 
 ## User Interface Design
 
-The visual system remains warm, playful, accessible, and mobile-first. The
-primary navigation uses **Today**, **Ideas**, **Plan**, and **Ask**.
+The visual system remains warm, accessible, and mobile-first. Fixed interface
+copy uses a direct, warm, mostly-English Spanglish voice: familiar Spanish can
+make supporting headings feel natural, but actions, privacy warnings, errors,
+and form labels remain unambiguous to an English-speaking traveler. The
+primary navigation remains **Today**, **Ideas**, **Plan**, and **Ask** so
+existing deep links and learned interaction patterns do not change. This voice
+does not modify user-entered text, place names and source text, or
+model-generated Ask responses.
+
+Today is a decision surface: it identifies the selected day, plainly states
+whether conditions are available, and presents recommendations as options for
+that day. Its summary names saved ideas and planned stops directly. Plan is a
+schedule surface: it introduces the itinerary as a day-by-day plan, labels
+pending optimizer output as suggested changes, and gives empty days a concise
+next step to select an existing idea. Neither surface uses aspirational
+travel-marketing slogans or metaphors.
 
 Ask owns its composer, loading, error, messages, inline saved-match cards, and
 inline suggestion cards. Enter submits, Shift+Enter inserts a newline, and
@@ -737,8 +751,8 @@ Place cards are content-first rather than photo-first. Each card shows:
 The Ideas view searches saved place names, localities, summaries, and tags. Its
 filters use supported interest, cost, duration, profile, accessibility, and
 favorite fields. The Plan view presents pending optimization proposals above the
-day-by-day itinerary with clear **Apply** and **Dismiss** controls. Applying a
-proposal identifies every proposed change before confirmation.
+day-by-day itinerary with clear **Apply changes** and **Not now** controls.
+Applying a proposal identifies every proposed change before confirmation.
 
 All controls maintain 44×44 px minimum touch targets, visible keyboard focus,
 reduced-motion support, and WCAG AA contrast. Outbound links open only after a
