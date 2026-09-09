@@ -222,6 +222,20 @@ export async function mockTripApi(
           (id: string) => id !== mutation.placeId,
         ),
       };
+    } else if (mutation.type === "remove-place") {
+      trip = {
+        ...trip,
+        version: trip.version + 1,
+        places: trip.places.filter(
+          (place: { id: string }) => place.id !== mutation.placeId,
+        ),
+        favoritePlaceIds: trip.favoritePlaceIds.filter(
+          (id: string) => id !== mutation.placeId,
+        ),
+        itinerary: trip.itinerary.filter(
+          (item: { placeId: string }) => item.placeId !== mutation.placeId,
+        ),
+      };
     } else if (mutation.type === "add-itinerary-item") {
       trip = {
         ...trip,

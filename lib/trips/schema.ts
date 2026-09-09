@@ -286,6 +286,9 @@ const mutation = z.discriminatedUnion("type", [
     })
     .strict(),
   z
+    .object({ type: z.literal("remove-place"), placeId: z.string().min(1) })
+    .strict(),
+  z
     .object({ type: z.literal("add-favorite"), placeId: z.string().min(1) })
     .strict(),
   z
