@@ -77,6 +77,46 @@ describe("itinerary mutation validation", () => {
       } as never),
     ).toThrow();
   });
+
+  it("assigns a moved item the next order on its destination day", () => {
+    const trip = makeTripV2({
+      itinerary: [
+        {
+          id: "move-me",
+          placeId: "place-balboa-park",
+          date: "2026-09-15",
+          startTime: null,
+          durationMinutes: 180,
+          order: 0,
+          notes: "",
+          status: "confirmed",
+        },
+        {
+          id: "already-there",
+          placeId: "place-tacos",
+          date: "2026-09-16",
+          startTime: null,
+          durationMinutes: 60,
+          order: 0,
+          notes: "",
+          status: "confirmed",
+        },
+      ],
+    });
+
+    const changed = applyTripMutation(trip, {
+      type: "update-itinerary-item",
+      itemId: "move-me",
+      changes: { date: "2026-09-16" },
+    } as never);
+
+    expect(
+      changed.itinerary.find((item) => item.id === "move-me"),
+    ).toMatchObject({
+      date: "2026-09-16",
+      order: 1,
+    });
+  });
 });
 
 // @spec PLAN-BE-002

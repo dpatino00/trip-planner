@@ -245,6 +245,19 @@ export async function mockTripApi(
           item.id === mutation.itemId ? { ...item, ...mutation.changes } : item,
         ),
       };
+    } else if (mutation.type === "reorder-itinerary-day") {
+      const order = new Map(
+        mutation.orderedItemIds.map((id: string, index: number) => [id, index]),
+      );
+      trip = {
+        ...trip,
+        version: trip.version + 1,
+        itinerary: trip.itinerary.map((item: { id: string; date: string }) =>
+          item.date === mutation.date
+            ? { ...item, order: order.get(item.id) }
+            : item,
+        ),
+      };
     } else if (mutation.type === "dismiss-plan-proposal") {
       trip = {
         ...trip,

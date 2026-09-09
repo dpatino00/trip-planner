@@ -18,6 +18,7 @@ import { tripCopy } from "@/lib/ui/copy";
 import type { GeocodingResult } from "@/lib/geocoding/open-meteo";
 import type {
   ConditionsEnvelope,
+  ItineraryItem,
   SavedPlace,
   SuggestedPlace,
   TripDocument,
@@ -227,6 +228,11 @@ export function TripWorkspace() {
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [selectedPlace, setSelectedPlace] = useState<SavedPlace | null>(null);
   const [planDate, setPlanDate] = useState("");
+  const [editingItem, setEditingItem] = useState<ItineraryItem | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editStartTime, setEditStartTime] = useState("");
+  const [editDurationMinutes, setEditDurationMinutes] = useState("");
+  const [editNotes, setEditNotes] = useState("");
   const [search, setSearch] = useState("");
   const [interest, setInterest] = useState("");
   const [mutationError, setMutationError] = useState("");
@@ -578,6 +584,80 @@ export function TripWorkspace() {
 
   async function commit(mutation: TripMutation) {
     await performMutation(mutation);
+  }
+
+  function openItineraryEditor(item: ItineraryItem) {
+    setEditingItem(item);
+    setEditDate(item.date);
+    setEditStartTime(item.startTime ?? "");
+    setEditDurationMinutes(
+      item.durationMinutes === null ? "" : String(item.durationMinutes),
+    );
+    setEditNotes(item.notes);
+  }
+
+  async function saveItineraryItem() {
+    if (!editingItem) return;
+    const durationMinutes = editDurationMinutes
+      ? Number(editDurationMinutes)
+      : null;
+    if (!Number.isInteger(durationMinutes) && durationMinutes !== null) {
+      setMutationError("Duration must be a whole number of minutes.");
+      return;
+    }
+    const outcome = await performMutation(
+      {
+        type: "update-itinerary-item",
+        itemId: editingItem.id,
+        changes: {
+          date: editDate,
+          startTime: editStartTime || null,
+          durationMinutes,
+          notes: editNotes,
+        },
+      },
+      {
+        date: editDate,
+        startTime: editStartTime,
+        durationMinutes: editDurationMinutes,
+        notes: editNotes,
+      },
+    );
+    if (outcome.status === "saved" || outcome.status === "duplicate") {
+      setEditingItem(null);
+    }
+  }
+
+  function moveUntimedItem(
+    date: string,
+    items: ItineraryItem[],
+    itemId: string,
+    direction: -1 | 1,
+  ) {
+    const untimedItemIds = items
+      .filter((item) => item.startTime === null)
+      .map((item) => item.id);
+    const currentIndex = untimedItemIds.indexOf(itemId);
+    const destinationIndex = currentIndex + direction;
+    if (
+      currentIndex < 0 ||
+      destinationIndex < 0 ||
+      destinationIndex >= untimedItemIds.length
+    ) {
+      return;
+    }
+    [untimedItemIds[currentIndex], untimedItemIds[destinationIndex]] = [
+      untimedItemIds[destinationIndex],
+      untimedItemIds[currentIndex],
+    ];
+    let untimedIndex = 0;
+    void commit({
+      type: "reorder-itinerary-day",
+      date,
+      orderedItemIds: items.map((item) =>
+        item.startTime === null ? untimedItemIds[untimedIndex++] : item.id,
+      ),
+    });
   }
 
   function addSuggestedPlace(suggestion: SuggestedPlace) {
@@ -1246,9 +1326,16 @@ export function TripWorkspace() {
                     </h3>
                     {!items.length && <p>{tripCopy.workspace.plan.emptyDay}</p>}
                     <ol>
-                      {items.map((item, index) => {
+                      {items.map((item) => {
                         const place = placeById.get(item.placeId);
                         if (!place) return null;
+                        const untimedItems = items.filter(
+                          (candidate) => candidate.startTime === null,
+                        );
+                        const untimedIndex = untimedItems.findIndex(
+                          (candidate) => candidate.id === item.id,
+                        );
+                        const isUntimed = item.startTime === null;
                         return (
                           <li data-testid="itinerary-item" key={item.id}>
                             <div>
@@ -1260,6 +1347,7 @@ export function TripWorkspace() {
                             <div className="item-actions">
                               {item.status === "tentative" && (
                                 <button
+                                  disabled={isOffline}
                                   onClick={() =>
                                     commit({
                                       type: "update-itinerary-item",
@@ -1272,16 +1360,39 @@ export function TripWorkspace() {
                                   Confirm
                                 </button>
                               )}
-                              <button aria-label={`Edit ${place.name}`}>
+                              <button
+                                disabled={isOffline}
+                                onClick={() => openItineraryEditor(item)}
+                                aria-label={`Edit ${place.name}`}
+                              >
                                 Edit
                               </button>
                               <button
-                                disabled={index === 0}
+                                disabled={
+                                  isOffline || !isUntimed || untimedIndex === 0
+                                }
+                                onClick={() =>
+                                  moveUntimedItem(date, items, item.id, -1)
+                                }
                                 aria-label={`Move ${place.name} up`}
                               >
                                 ↑
                               </button>
                               <button
+                                disabled={
+                                  isOffline ||
+                                  !isUntimed ||
+                                  untimedIndex === untimedItems.length - 1
+                                }
+                                onClick={() =>
+                                  moveUntimedItem(date, items, item.id, 1)
+                                }
+                                aria-label={`Move ${place.name} down`}
+                              >
+                                ↓
+                              </button>
+                              <button
+                                disabled={isOffline}
                                 onClick={() =>
                                   commit({
                                     type: "remove-itinerary-item",
@@ -1362,6 +1473,80 @@ export function TripWorkspace() {
                 Add to plan
               </button>
             </div>
+          </section>
+        </div>
+      )}
+
+      {editingItem && (
+        <div className="modal-backdrop">
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-itinerary-title"
+          >
+            <h2 id="edit-itinerary-title">Edit plan item</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveItineraryItem();
+              }}
+            >
+              <label>
+                Plan date
+                <select
+                  aria-label="Edit plan date"
+                  value={editDate}
+                  onChange={(event) => setEditDate(event.target.value)}
+                >
+                  {tripDates.map((date) => (
+                    <option key={date} value={date}>
+                      {dateLabel(date)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Start time
+                <input
+                  aria-label="Start time"
+                  type="time"
+                  value={editStartTime}
+                  onChange={(event) => setEditStartTime(event.target.value)}
+                />
+              </label>
+              <label>
+                Duration (minutes)
+                <input
+                  aria-label="Duration minutes"
+                  type="number"
+                  min="15"
+                  max="1440"
+                  step="1"
+                  value={editDurationMinutes}
+                  onChange={(event) =>
+                    setEditDurationMinutes(event.target.value)
+                  }
+                />
+              </label>
+              <label>
+                Notes
+                <textarea
+                  aria-label="Plan notes"
+                  maxLength={500}
+                  value={editNotes}
+                  onChange={(event) => setEditNotes(event.target.value)}
+                />
+              </label>
+              <div className="modal-actions">
+                <button type="button" onClick={() => setEditingItem(null)}>
+                  Cancel
+                </button>
+                <button className="primary" type="submit">
+                  Save changes
+                </button>
+              </div>
+            </form>
           </section>
         </div>
       )}
