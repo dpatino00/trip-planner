@@ -218,8 +218,8 @@ test("keeps saved ideas out of general discovery searches", async ({
   expect(backend.getTrip()).toEqual(makeTripV2());
 });
 
-// @spec CHAT-BE-002, CHAT-BE-015, CHAT-BE-016, CHAT-BE-019, CHAT-API-011, CHAT-UI-010
-test("automatically adds and renders a verified source for an unsourced saved match", async ({
+// @spec CHAT-BE-002, CHAT-BE-015, CHAT-BE-016, CHAT-BE-019, CHAT-BE-031, CHAT-API-011, CHAT-UI-010
+test("explicitly adds and renders a verified source for an unsourced saved match", async ({
   page,
 }) => {
   const backend = createMockTripBackend();
@@ -235,7 +235,7 @@ test("automatically adds and renders a verified source for an unsourced saved ma
   await page.getByRole("link", { name: "Ask" }).click();
   await page
     .getByLabel("Ask about this trip")
-    .fill("Tell me about Torrey Pines");
+    .fill("Find a link for my saved Torrey Pines idea");
   await page.getByRole("button", { name: "Send" }).click();
 
   const match = page.getByTestId("saved-match-card");
@@ -649,9 +649,7 @@ test("adds saved places as confirmed and confirms tentative items", async ({
 });
 
 // @spec PLAN-UI-006, PLAN-UI-007, PLAN-UI-008, PLAN-UI-009
-test("edits, orders, moves, and rolls back itinerary items", async ({
-  page,
-}) => {
+test("edits and reorders untimed itinerary items", async ({ page }) => {
   const api = await mockTripApi(page);
   api.setTrip(
     makeTripV2({
@@ -676,6 +674,16 @@ test("edits, orders, moves, and rolls back itinerary items", async ({
           notes: "",
           status: "confirmed",
         },
+        {
+          id: "late-lunch",
+          placeId: "place-balboa-park",
+          date: "2026-09-15",
+          startTime: null,
+          durationMinutes: 90,
+          order: 2,
+          notes: "",
+          status: "confirmed",
+        },
       ],
     }),
   );
@@ -687,11 +695,44 @@ test("edits, orders, moves, and rolls back itinerary items", async ({
     page.getByRole("button", { name: "Move Oscar's Mexican Seafood up" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Edit Balboa Park" }),
+    page.getByRole("button", { name: "Edit Balboa Park" }).first(),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Remove Balboa Park" }),
+    page.getByRole("button", { name: "Remove Balboa Park" }).first(),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Edit Balboa Park" }).first().click();
+  await page.getByLabel("Edit plan date").selectOption("2026-09-16");
+  await page.getByLabel("Start time").fill("18:30");
+  await page.getByLabel("Duration minutes").fill("120");
+  await page.getByLabel("Plan notes").fill("Book ahead");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Edit plan item" }),
+  ).toBeHidden();
+  expect(
+    api
+      .getTrip()
+      .itinerary.find((item: { id: string }) => item.id === "dinner"),
+  ).toMatchObject({
+    date: "2026-09-16",
+    startTime: "18:30",
+    durationMinutes: 120,
+    notes: "Book ahead",
+  });
+  await page
+    .getByRole("button", { name: "Move Balboa Park up" })
+    .first()
+    .click();
+  expect(
+    api
+      .getTrip()
+      .itinerary.filter((item: { date: string }) => item.date === "2026-09-15")
+      .sort(
+        (left: { order: number }, right: { order: number }) =>
+          left.order - right.order,
+      )
+      .map((item: { id: string }) => item.id),
+  ).toEqual(["late-lunch", "untimed"]);
 });
 
 // @spec APP-UI-001, APP-UI-002, APP-UI-003, APP-UI-004, APP-UI-007

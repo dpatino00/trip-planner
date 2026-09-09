@@ -52,8 +52,14 @@ export async function mockTripApi(
     json(route, makeConditionsV2()),
   );
   await page.route("**/api/trip/chat", (route) => {
-    const request = route.request().postDataJSON() as { message?: string };
-    if (/torrey pines/i.test(request.message ?? "")) {
+    const request = route.request().postDataJSON() as {
+      message?: string;
+      createCards?: boolean;
+    };
+    if (
+      /torrey pines/i.test(request.message ?? "") &&
+      /link|url|website|source/i.test(request.message ?? "")
+    ) {
       const current = backend.getTrip();
       const sourceUrl = "https://www.parks.ca.gov/torreypines";
       const trip = {
@@ -243,6 +249,19 @@ export async function mockTripApi(
         version: trip.version + 1,
         itinerary: trip.itinerary.map((item: { id: string }) =>
           item.id === mutation.itemId ? { ...item, ...mutation.changes } : item,
+        ),
+      };
+    } else if (mutation.type === "reorder-itinerary-day") {
+      const order = new Map(
+        mutation.orderedItemIds.map((id: string, index: number) => [id, index]),
+      );
+      trip = {
+        ...trip,
+        version: trip.version + 1,
+        itinerary: trip.itinerary.map((item: { id: string; date: string }) =>
+          item.date === mutation.date
+            ? { ...item, order: order.get(item.id) }
+            : item,
         ),
       };
     } else if (mutation.type === "dismiss-plan-proposal") {

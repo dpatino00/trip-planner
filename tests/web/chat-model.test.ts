@@ -69,10 +69,10 @@ it("uses strict Responses parsing with one bounded web search", async () => {
     /general discovery.*new places|explicitly asks.*saved/i,
   );
   expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
-    /saved match.*missing.*source URL.*must.*web search/i,
+    /explicitly request.*link|link-enrichment/i,
   );
   expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
-    /saved match.*already.*source URL.*do not.*web search/i,
+    /merely.*mention.*saved|ordinary.*saved.*lookup.*not.*enrich/i,
   );
   expect(JSON.stringify(parse.mock.calls[0][0])).toMatch(
     /savedPlaceSources.*savedPlaceId.*sourceUrl/i,
@@ -94,6 +94,76 @@ it("uses strict Responses parsing with one bounded web search", async () => {
     sources: [sourceUrl],
     usage: { inputTokens: 42, outputTokens: 12, totalTokens: 54 },
   });
+});
+
+// @spec CHAT-DATA-001, CHAT-DATA-005, CHAT-BE-001, CHAT-BE-029, CHAT-BE-030
+it("instructs explicit-card mode to create only named place, event, or activity cards", async () => {
+  const parse = vi.fn().mockResolvedValue({
+    status: "completed",
+    output_parsed: {
+      message: "Review the named event.",
+      savedPlaceIds: [],
+      savedPlaceSources: [],
+      suggestions: [],
+      unresolvedPlaceNames: [],
+    },
+    output: [],
+  });
+  const model = createOpenAITripChatModel({
+    client: { responses: { parse } },
+    model: "gpt-test",
+  });
+
+  await model.generate({
+    message: "Shakespeare in the Park on Friday",
+    history: [],
+    context: {} as never,
+    mode: "card",
+  });
+
+  expect(parse).toHaveBeenCalledWith(
+    expect.objectContaining({ max_output_tokens: 5000, max_tool_calls: 4 }),
+    expect.anything(),
+  );
+  const request = JSON.stringify(parse.mock.calls[0][0]);
+  expect(request).toMatch(/named.*places.*events.*activities/i);
+  expect(request).toMatch(/open-ended.*no.*cards|do not.*unnamed/i);
+  expect(request).toMatch(/sourceUrl.*null|without.*source/i);
+});
+
+// @spec CHAT-BE-001, CHAT-BE-031, CHAT-BE-032
+it("limits link-enrichment mode to explicit saved-idea link requests", async () => {
+  const parse = vi.fn().mockResolvedValue({
+    status: "completed",
+    output_parsed: {
+      message: "I found a saved-idea link.",
+      savedPlaceIds: [],
+      savedPlaceSources: [],
+      suggestions: [],
+      unresolvedPlaceNames: [],
+    },
+    output: [],
+  });
+  const model = createOpenAITripChatModel({
+    client: { responses: { parse } },
+    model: "gpt-test",
+  });
+
+  await model.generate({
+    message: "Find a link for my saved Torrey Pines idea",
+    history: [],
+    context: {} as never,
+    mode: "link",
+  });
+
+  expect(parse).toHaveBeenCalledWith(
+    expect.objectContaining({ max_output_tokens: 1600, max_tool_calls: 1 }),
+    expect.anything(),
+  );
+  const request = JSON.stringify(parse.mock.calls[0][0]);
+  expect(request).toMatch(/link-enrichment|explicit.*link/i);
+  expect(request).toMatch(/saved.*only|no.*new.*suggestion/i);
+  expect(request).toMatch(/exact HTTPS.*search/i);
 });
 
 // @spec CHAT-DATA-006, CHAT-BE-001, CHAT-BE-021, CHAT-BE-022, CHAT-BE-023, CHAT-BE-024, SEC-API-007

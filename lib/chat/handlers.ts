@@ -1,6 +1,7 @@
 import { buildTripChatContext } from "@/lib/chat/context";
 import {
   hasExplicitAdditionIntent,
+  hasExplicitLinkEnrichmentIntent,
   hasExplicitSavedPlaceLookupIntent,
   normalizedPlaceKey,
 } from "@/lib/chat/intent";
@@ -179,7 +180,7 @@ async function withTimeout<T>(
   }
 }
 
-// @spec CHAT-DATA-002, CHAT-DATA-005, CHAT-DATA-007, CHAT-API-001, CHAT-API-002, CHAT-API-003, CHAT-API-004, CHAT-API-005, CHAT-API-006, CHAT-API-007, CHAT-API-008, CHAT-API-009, CHAT-API-010, CHAT-API-011, CHAT-API-012, CHAT-BE-002, CHAT-BE-009, CHAT-BE-010, CHAT-BE-011, CHAT-BE-012, CHAT-BE-013, CHAT-BE-015, CHAT-BE-020, CHAT-BE-021, CHAT-BE-022
+// @spec CHAT-DATA-002, CHAT-DATA-005, CHAT-DATA-007, CHAT-API-001, CHAT-API-002, CHAT-API-003, CHAT-API-004, CHAT-API-005, CHAT-API-006, CHAT-API-007, CHAT-API-008, CHAT-API-009, CHAT-API-010, CHAT-API-011, CHAT-API-012, CHAT-API-013, CHAT-BE-002, CHAT-BE-009, CHAT-BE-010, CHAT-BE-011, CHAT-BE-012, CHAT-BE-013, CHAT-BE-015, CHAT-BE-020, CHAT-BE-021, CHAT-BE-022, CHAT-BE-029, CHAT-BE-030, CHAT-BE-031, CHAT-BE-032
 export function createTripChatHandler({
   repository,
   rateLimiter,
@@ -290,20 +291,35 @@ export function createTripChatHandler({
       const trip = migrateTripDocument(stored.trip);
       const context = buildTripChatContext(trip);
       const explicitAddition = hasExplicitAdditionIntent(parsed.data.message);
-      const additionMode = contractV3 && explicitAddition;
+      const cardMode =
+        contractV3 &&
+        "createCards" in parsed.data &&
+        parsed.data.createCards === true;
+      const linkMode =
+        !cardMode && hasExplicitLinkEnrichmentIntent(parsed.data.message);
+      const additionMode =
+        !cardMode && !linkMode && contractV3 && explicitAddition;
+      const batchMode = cardMode || additionMode;
       const savedPlaceLookup =
         hasExplicitSavedPlaceLookupIntent(parsed.data.message) ||
         (!contractV3 && explicitAddition);
+      const modelMode = cardMode
+        ? "card"
+        : linkMode
+          ? "link"
+          : additionMode
+            ? "addition"
+            : "standard";
       const generated = await withTimeout(
         (signal) =>
           model.generate({
             message: parsed.data.message,
             history: parsed.data.history,
             context,
-            mode: additionMode ? "addition" : "standard",
+            mode: modelMode,
             signal,
           }),
-        timeoutMs ?? (additionMode ? 45_000 : 20_000),
+        timeoutMs ?? (batchMode ? 45_000 : 20_000),
       );
       usage = generated.usage;
       const output = tripChatCandidateResponseSchema.safeParse(
@@ -314,7 +330,9 @@ export function createTripChatHandler({
       const boundedIds = new Set(context.places.map((place) => place.id));
       const authoritativeIds = new Set(trip.places.map((place) => place.id));
       const savedPlaceIds = (
-        additionMode || savedPlaceLookup ? output.data.savedPlaceIds : []
+        batchMode || linkMode || savedPlaceLookup
+          ? output.data.savedPlaceIds
+          : []
       )
         .filter(
           (id, index, ids) =>
@@ -322,7 +340,7 @@ export function createTripChatHandler({
             boundedIds.has(id) &&
             authoritativeIds.has(id),
         )
-        .slice(0, additionMode ? 12 : 3);
+        .slice(0, batchMode || linkMode ? 12 : 3);
       const existingPlaceKeys = new Set(
         trip.places.map((place) =>
           normalizedPlaceKey(place.name, place.locality),
@@ -331,7 +349,7 @@ export function createTripChatHandler({
       const searchedUrls = suppliedHttpsUrls(generated.sources ?? []);
       const suggestions: (typeof output.data.suggestions)[number][] = [];
       const suggestionKeys = new Set<string>();
-      if (additionMode || savedPlaceIds.length === 0) {
+      if (batchMode || (!linkMode && savedPlaceIds.length === 0)) {
         for (const suggestion of output.data.suggestions) {
           const key = normalizedPlaceKey(suggestion.name, suggestion.locality);
           if (existingPlaceKeys.has(key) || suggestionKeys.has(key)) continue;
@@ -340,10 +358,10 @@ export function createTripChatHandler({
             searchedUrls.has(suggestion.sourceUrl)
               ? suggestion.sourceUrl
               : null;
-          if (!additionMode && sourceUrl === null) continue;
+          if (!batchMode && sourceUrl === null) continue;
           suggestionKeys.add(key);
           suggestions.push({ ...suggestion, sourceUrl });
-          if (suggestions.length >= (additionMode ? 12 : 3)) break;
+          if (suggestions.length >= (batchMode ? 12 : 3)) break;
         }
       }
       const resultBudgetAfterSuggestions = Math.max(
@@ -361,7 +379,7 @@ export function createTripChatHandler({
       );
       const unresolvedPlaceNames: string[] = [];
       const unresolvedKeys = new Set<string>();
-      if (additionMode) {
+      if (batchMode) {
         for (const unresolvedName of output.data.unresolvedPlaceNames) {
           const key = normalizedPlaceKey(unresolvedName, null);
           if (resolvedNames.has(key) || unresolvedKeys.has(key)) continue;
@@ -372,17 +390,17 @@ export function createTripChatHandler({
         }
       }
       const savedIdSet = new Set(savedPlaceIds);
-      const sourceCandidates = output.data.savedPlaceSources.filter(
-        (candidate) => {
-          if (!savedIdSet.has(candidate.savedPlaceId)) return false;
-          const place = trip.places.find(
-            (item) => item.id === candidate.savedPlaceId,
-          );
-          return (
-            place?.sourceUrl === null && searchedUrls.has(candidate.sourceUrl)
-          );
-        },
-      );
+      const sourceCandidates = linkMode
+        ? output.data.savedPlaceSources.filter((candidate) => {
+            if (!savedIdSet.has(candidate.savedPlaceId)) return false;
+            const place = trip.places.find(
+              (item) => item.id === candidate.savedPlaceId,
+            );
+            return (
+              place?.sourceUrl === null && searchedUrls.has(candidate.sourceUrl)
+            );
+          })
+        : [];
       const responseTrip = sourceCandidates.length
         ? await enrichSavedPlaceSources({
             repository,
@@ -401,12 +419,12 @@ export function createTripChatHandler({
       const response = tripChatResponseSchema.safeParse({
         message: output.data.message,
         savedPlaceIds: finalSavedPlaceIds,
-        suggestions: additionMode
+        suggestions: batchMode
           ? suggestions.slice(0, Math.max(0, 12 - finalSavedPlaceIds.length))
-          : finalSavedPlaceIds.length > 0
+          : linkMode || finalSavedPlaceIds.length > 0
             ? []
             : suggestions,
-        unresolvedPlaceNames: additionMode
+        unresolvedPlaceNames: batchMode
           ? unresolvedPlaceNames.slice(
               0,
               Math.max(0, 12 - finalSavedPlaceIds.length - suggestions.length),

@@ -1,7 +1,7 @@
 # Conversational Trip Companion — High-Level Design
 
 **Created**: 2026-09-01
-**Last updated**: 2026-09-07
+**Last updated**: 2026-09-08
 
 ## Problem Statement
 
@@ -14,17 +14,16 @@ emerge naturally in conversation.
 
 The Trip Companion will be a mobile-first shared trip website with an embedded
 Ask experience. Travelers can ask for contextual advice and receive reviewable
-new-place suggestions without leaving the trip; saved ideas are surfaced when
-the traveler explicitly asks about them. Travelers can also paste free-form
-prose, lists, or tables naming up to twelve places and review saved matches,
-new-place cards, and unresolved names together without reformatting the input.
-Only an explicit individual or bulk Add to trip action adds a new place to the
-shared plan. The
-single narrow exception is source-link enrichment: when Ask returns a saved
-place whose source URL is missing, it automatically attaches an exact HTTPS
-reference found in its current bounded web search. The shared trip remains the
-visual and durable source of truth. A private Custom GPT may continue to use
-authenticated Actions as an optional secondary client.
+trip-idea cards without leaving the trip; saved ideas are surfaced when the
+traveler explicitly asks about them. A one-message Create cards control turns
+up to twelve explicitly named places, events, or activities from free-form
+prose, lists, or tables into saved matches, new cards, and unresolved names
+without relying on trigger wording. Only an explicit individual or bulk Add to
+trip action adds a new idea to the shared plan. A traveler may explicitly ask
+Ask to find a link for a named saved idea that lacks one; the server may attach
+only an exact HTTPS reference found in that request's bounded web search. The
+shared trip remains the visual and durable source of truth. A private Custom
+GPT may continue to use authenticated Actions as an optional secondary client.
 
 ## Goals
 
@@ -32,19 +31,21 @@ authenticated Actions as an optional secondary client.
 - Support arbitrary trip destinations and traveler-supplied places rather than a
   San Diego-only catalog.
 - Let travelers ask an embedded AI for trip-aware narrative advice and discover
-  new places without repeating ideas already saved, while supporting explicit
-  saved-place and add-to-trip requests.
-- Turn an explicit free-form request containing up to twelve named places into
-  a complete review set that can mix authoritative saved matches, new
-  suggestions, and names requiring clarification.
+  new ideas without repeating ideas already saved, while supporting explicit
+  saved-idea and add-to-trip requests.
+- Turn an explicit free-form request containing up to twelve named places,
+  events, or activities into a complete review set that can mix authoritative
+  saved matches, new cards, and names requiring clarification.
+- Provide a one-message Create cards control that deterministically requests
+  cards for named trip ideas without depending on conversational trigger words.
 - Require explicit confirmation before an AI suggestion changes shared state.
 - Let travelers confirm generated places individually or add all valid new
   suggestions in one atomic trip update.
-- Automatically add a search-grounded reference link to a matched saved place
-  when that place has no source URL, without overwriting existing links or
-  changing any other place or itinerary field.
+- On an explicit traveler request, add a search-grounded reference link to a
+  named saved idea that has no source URL, without overwriting existing links
+  or changing any other idea or itinerary field.
 - Preserve authenticated Custom GPT Actions as an optional secondary client.
-- Turn conversational requests into structured place ideas, preferences,
+- Turn conversational requests into structured trip ideas, preferences,
   constraints, and itinerary proposals without requiring repeated form entry.
 - Recompute deterministic trip suggestions after relevant mutations using
   weather, marine conditions where applicable, air quality, daylight, traveler
@@ -53,7 +54,7 @@ authenticated Actions as an optional secondary client.
   creating accounts.
 - Give the two trusted owners a password-protected catalog for creating,
   finding, copying, and deleting managed trips without exposing the trip list.
-- Give every saved place and Ask suggestion useful Apple Maps, Google Maps, and
+- Give every saved idea and Ask card useful Apple Maps, Google Maps, and
   Google Maps directions links generated from its name, locality, and available
   coordinates; preserve a supplied source URL when present. Place imagery is
   optional.
@@ -73,8 +74,9 @@ authenticated Actions as an optional secondary client.
 - Adding embeddings, a vector database, background place enrichment, a separate
   search provider, or a second Ask endpoint for saved-place discovery.
 - Allowing the embedded model to use tools other than bounded web searches for
-  place-reference links, or to directly mutate trip data beyond the server's
-  narrowly validated addition of a previously missing saved-place source URL.
+  idea-reference links, or to directly mutate trip data beyond the server's
+  narrowly validated addition of a previously missing saved-idea source URL in
+  response to an explicit traveler request.
 - Allowing the GPT to edit application code, deploy the website, make bookings,
   purchase anything, or delete a trip.
 - Letting automated optimization silently overwrite confirmed itinerary choices.
@@ -102,10 +104,10 @@ changes without manually transferring details between ChatGPT and the website.
 They are comfortable treating a private shared link as the credential for their
 trip.
 
-The trip and place models will be destination-neutral. A conversationally added
-place may include a name, locality, coordinates, notes, categories, scheduling
-preferences, and an external source URL. Missing optional enrichment must not
-prevent the place from being saved.
+The trip and idea models will be destination-neutral. A conversationally added
+place, event, or activity may include a name, locality, coordinates, notes,
+categories, scheduling preferences, and an external source URL. Missing
+optional enrichment must not prevent the idea from being saved.
 
 ## System Architecture Overview
 
@@ -224,13 +226,13 @@ live, stale, and unavailable data.
 | Decision                                                                      | Rationale                                                                                                                                                                                                  | Alternatives considered                                                                                                 |
 | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | Make the website the trip source of truth and ChatGPT a client                | The plan stays durable, inspectable, and usable even when ChatGPT is closed; conversation becomes a convenient control surface instead of a second datastore.                                              | Storing the plan only in GPT conversation history, letting GPT edit website files.                                      |
-| Support custom places from conversation                                       | Travelers can plan any destination without waiting for a hardcoded catalog. Structured fields keep GPT output testable.                                                                                    | One destination-specific catalog, a mandatory paid place-search API.                                                    |
+| Support custom trip ideas from conversation                                  | Travelers can plan any destination, event, or activity without waiting for a hardcoded catalog. Existing structured fields keep GPT output testable.                                                       | A destination-specific catalog, a mandatory paid place-search API, or a separate event schema.                         |
 | Make embedded Ask the primary conversational surface                          | Travelers retain trip context and review suggestions in one mobile flow; the model remains a read-only authenticated client until explicit confirmation.                                                   | Custom GPT Actions only, manual copy and paste.                                                                         |
 | Keep chat session-local                                                       | Conversation content is not shared trip state and is limited to the current browser tab, reducing storage and privacy risk.                                                                                | Server-side conversation history, durable browser history.                                                              |
 | Rank saved places in the existing structured model response                   | Natural-language requests can reuse saved summaries and normalized tags with one model request; authoritative IDs let the server and UI render current trip data without accepting model-generated copies. | Embeddings, vector search, deterministic keyword ranking, a second model request.                                       |
-| Treat explicit multi-place additions as a bounded batch                       | Travelers can paste natural prose without reformatting it, review saved and new places together, and confirm up to twelve additions atomically while ordinary discovery stays concise.                     | Requiring tables, splitting every list into groups of three, automatically saving model output.                         |
+| Provide explicit named-idea card creation as a bounded batch                 | Travelers can turn named prose into cards with a transient control, review saved and new ideas together, and confirm up to twelve additions atomically without relying on trigger wording.                | Requiring tables, expanding heuristic trigger words, splitting every list into groups of three, automatically saving model output. |
 | Return only search-grounded new-place suggestions when no saved place matches | Existing decisions remain primary and avoid unnecessary discovery calls; every new suggestion remains inspectable through a clickable source before and after saving.                                      | Always combining saved and new places, accepting unsourced suggestions, treating narrative URLs as evidence.            |
-| Automatically enrich a matched saved place that lacks a source URL            | A missing reference link is low-risk metadata that improves the saved card immediately. The server accepts only exact current-search evidence, never overwrites a link, and changes no other trip data.    | Requiring a separate confirmation for every link, background enrichment, allowing the model to mutate arbitrary fields. |
+| Enrich a missing saved-idea link only on an explicit request                  | Travelers control when Ask searches for a reference; the server accepts only exact current-search evidence, never overwrites a link, and changes no other trip data.                                     | Automatic enrichment on every mention, background enrichment, allowing the model to mutate arbitrary fields.            |
 | Use strict Structured Outputs for suggestions                                 | A validated transport shape prevents malformed model data from reaching mutation code, while narrative plan advice avoids a competing proposal schema.                                                     | Free-form extraction, model-created plan proposals.                                                                     |
 | Use a dedicated Action API key for the private MVP                            | It is the smallest supported authentication model for an owner-operated GPT and remains separate from OpenAI and trip-sharing credentials.                                                                 | No Action authentication, OAuth in the first release.                                                                   |
 | Keep optimization deterministic and proposal-based                            | Results remain explainable and testable; confirmed plans are not silently rearranged.                                                                                                                      | An autonomous AI worker that directly rewrites the itinerary.                                                           |

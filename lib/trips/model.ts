@@ -46,7 +46,11 @@ export function createTripDocument(
 }
 
 function nextOrder(items: ItineraryItem[], date: string) {
-  return items.filter((item) => item.date === date).length;
+  return items.reduce(
+    (next, item) =>
+      item.date === date ? Math.max(next, item.order + 1) : next,
+    0,
+  );
 }
 
 // @spec TRIP-DATA-009, TRIP-BE-008, PLAN-BE-001, PLAN-BE-002, PLAN-BE-003
@@ -124,9 +128,18 @@ export function applyTripMutation(
         (item) => item.id === mutation.itemId,
       );
       if (index < 0) throw new Error("Itinerary item does not exist");
+      const previous = next.itinerary[index];
+      const destinationDate = mutation.changes.date ?? previous.date;
       next.itinerary[index] = {
-        ...next.itinerary[index],
+        ...previous,
         ...mutation.changes,
+        order:
+          destinationDate === previous.date
+            ? previous.order
+            : nextOrder(
+                next.itinerary.filter((item) => item.id !== previous.id),
+                destinationDate,
+              ),
       };
       break;
     }

@@ -117,6 +117,70 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
   expect(screen.queryByText("La Jolla Cove")).not.toBeInTheDocument();
 });
 
+// @spec CHAT-DATA-001, CHAT-UI-007, CHAT-UI-016, CHAT-UI-017
+it("submits a one-message Create cards choice and renders an unsourced event as a trip idea", async () => {
+  const event = {
+    ...suggestion,
+    name: "Shakespeare in the Park",
+    summary:
+      "An outdoor Shakespeare performance named by the traveler for Friday evening. Schedule and availability details remain unverified.",
+    locality: "Balboa Park",
+    interests: ["culture" as const],
+    tags: ["theater", "outdoor", "event"],
+    profile: "outdoor" as const,
+    preferredDayparts: ["evening" as const],
+    durationMinutes: 150,
+    costLevel: null,
+    reservationRecommended: null,
+    sourceUrl: null,
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({
+      message: "I made a card for the named event.",
+      savedPlaceIds: [],
+      suggestions: [event],
+      unresolvedPlaceNames: [],
+      tripVersion: 1,
+    }),
+  );
+  render(
+    <TripChat
+      token={SHARE_TOKEN}
+      trip={makeTripV2()}
+      online
+      onAddSuggestion={vi.fn()}
+      onViewSavedPlace={vi.fn()}
+    />,
+  );
+
+  const composer = screen.getByLabelText("Ask about this trip");
+  const createCards = screen.getByRole("checkbox", { name: "Create cards" });
+  await waitFor(() => expect(composer).toBeEnabled());
+  expect(createCards).not.toBeChecked();
+  fireEvent.click(createCards);
+  fireEvent.change(composer, {
+    target: { value: "Shakespeare in the Park on Friday" },
+  });
+  fireEvent.keyDown(composer, { key: "Enter" });
+
+  await screen.findByText("I made a card for the named event.");
+  expect(createCards).not.toBeChecked();
+  const submitted = JSON.parse(
+    String((fetchMock.mock.calls[0][1] as RequestInit).body),
+  );
+  expect(submitted).toMatchObject({
+    message: "Shakespeare in the Park on Friday",
+    createCards: true,
+  });
+  expect(JSON.stringify(submitted.history)).not.toContain("createCards");
+  const card = screen.getByRole("article", {
+    name: "Shakespeare in the Park",
+  });
+  expect(card).toHaveTextContent("TRIP IDEA · DETAILS UNVERIFIED");
+  expect(within(card).queryByRole("link", { name: "Learn more" })).toBeNull();
+  expect(within(card).getByRole("link", { name: "Apple Maps" })).toBeVisible();
+});
+
 // @spec CHAT-UI-006, PWA-UI-007
 it("restores saved matches while disabling generation and confirmation offline", async () => {
   await saveChatSession(SHARE_TOKEN, [
@@ -142,6 +206,7 @@ it("restores saved matches while disabling generation and confirmation offline",
     />,
   );
   expect(screen.getByLabelText("Ask about this trip")).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "Create cards" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   expect(screen.getByText(/Connect to ask/)).toBeVisible();
   expect(
