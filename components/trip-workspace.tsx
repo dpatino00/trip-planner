@@ -71,6 +71,34 @@ function matchesSuggestedPlace(place: SavedPlace, suggestion: SuggestedPlace) {
       normalizedPlaceValue(suggestion.locality)
   );
 }
+
+function mutationIsPresent(trip: TripDocument, mutation: TripApiMutation) {
+  if (mutation.type === "update-itinerary-item") {
+    const item = trip.itinerary.find(
+      (candidate) => candidate.id === mutation.itemId,
+    );
+    return Boolean(
+      item &&
+      Object.entries(mutation.changes).every(
+        ([key, value]) => item[key as keyof typeof item] === value,
+      ),
+    );
+  }
+  if (mutation.type === "reorder-itinerary-day") {
+    const actual = trip.itinerary
+      .filter((item) => item.date === mutation.date)
+      .sort((left, right) => left.order - right.order)
+      .map((item) => item.id);
+    return (
+      actual.length === mutation.orderedItemIds.length &&
+      actual.every((id, index) => id === mutation.orderedItemIds[index])
+    );
+  }
+  if (mutation.type === "remove-itinerary-item") {
+    return !trip.itinerary.some((item) => item.id === mutation.itemId);
+  }
+  return false;
+}
 function emptyConditions(target: string): ConditionsEnvelope {
   return {
     status: "unavailable",
@@ -484,6 +512,18 @@ export function TripWorkspace() {
         trip: outcome.trip,
       };
     } catch (cause) {
+      try {
+        const refreshed = await tripState.mutate();
+        const refreshedTrip = refreshed?.trip;
+        if (refreshedTrip && mutationIsPresent(refreshedTrip, mutation)) {
+          setCachedTrip(refreshedTrip);
+          await saveTripSnapshot(token, refreshedTrip);
+          setMutationError("");
+          return { status: "saved" as const, trip: refreshedTrip };
+        }
+      } catch {
+        // Preserve the original error when reconciliation is unavailable.
+      }
       setMutationError(
         cause instanceof Error ? cause.message : "Could not save that change",
       );
