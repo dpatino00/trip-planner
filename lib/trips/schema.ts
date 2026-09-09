@@ -237,6 +237,7 @@ const placeChanges = savedPlaceSchema
   .partial()
   .strict();
 const mutation = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("generate-plan-proposal") }).strict(),
   z
     .object({
       type: z.literal("update-details"),

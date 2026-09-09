@@ -447,6 +447,16 @@ interface TripChatModelResponse {
 }
 ```
 
+Contract version four adds a nullable `scheduledItem` response field with one
+saved-place ID, an inclusive trip date, a local `HH:MM` start time, and a
+15–1,440-minute duration. The compact context includes the server-resolved
+destination-local current date so relative dates resolve deterministically.
+Schedule mode accepts a candidate only when it references one authoritative
+bounded saved idea and all schedule values validate. It performs no web search
+or repository update, and asks for clarification when the request is incomplete
+or ambiguous. Version three, version two, and headerless callers retain their
+current response shapes.
+
 `SuggestedPlace` remains the transport and storage-adapter name for backward
 compatibility, but its product meaning is a generic trip idea. A place, event,
 or activity uses the same validated fields: the title is `name`; venue or area
@@ -505,8 +515,8 @@ never count as evidence. In addition or explicit-card mode, an ungrounded
 candidate URL is stripped while the otherwise valid suggestion is retained as
 Maps-only.
 
-The current browser sends `x-trip-chat-contract: 3`. It receives all five
-version-three fields. A version-two request receives its prior four-field shape,
+The current browser sends `x-trip-chat-contract: 4`. It receives every
+version-three field plus `scheduledItem`. A version-two request receives its prior four-field shape,
 three-item caps, required suggestion sources, and saved-match suppression. A
 headerless request receives only `message` and up to three sourced suggestions.
 This rolling-compatibility rule prevents cached clients from rejecting additive
@@ -765,6 +775,13 @@ Apple Maps, Google Maps, and Google Maps directions links before confirmation,
 plus a supplied source link when present. They retain explicit **Add to trip**
 and session-local **Dismiss** controls and expose saved, duplicate, or retry
 states.
+
+When a version-four response contains a valid scheduled item, Ask renders a
+plan-confirmation card with the authoritative saved idea, resolved date, local
+start time, and duration. **Confirm & add to plan** sends the existing
+authenticated versioned `add-itinerary-item` mutation with empty notes and
+confirmed status. Existing retry and failure behavior applies; the card does not
+assert availability or check timed overlaps.
 
 When an assistant response contains more than one new suggestion, Ask also shows
 **Add all new**. Activating it sends one atomic batch mutation and marks each

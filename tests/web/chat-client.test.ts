@@ -8,8 +8,8 @@ import {
 } from "@/lib/chat/session";
 import { SHARE_TOKEN } from "./fixtures";
 
-// @spec CHAT-DATA-004, CHAT-DATA-008, SEC-DATA-007
-it("stores at most twelve version-3 messages under a hash-derived session key", async () => {
+// @spec CHAT-DATA-004, CHAT-DATA-008, CHAT-DATA-012, SEC-DATA-007
+it("stores at most twelve version-4 messages under a hash-derived session key", async () => {
   const messages = Array.from({ length: 14 }, (_, index) => ({
     id: String(index),
     role: (index % 2 ? "assistant" : "user") as "assistant" | "user",
@@ -32,7 +32,7 @@ it("stores at most twelve version-3 messages under a hash-derived session key", 
     (stored.at(-1) as { unresolvedPlaceNames?: string[] } | undefined)
       ?.unresolvedPlaceNames,
   ).toEqual(["A place needing clarification"]);
-  expect(JSON.parse(sessionStorage.getItem(key) ?? "{}").version).toBe(3);
+  expect(JSON.parse(sessionStorage.getItem(key) ?? "{}").version).toBe(4);
 });
 
 // @spec CHAT-DATA-004

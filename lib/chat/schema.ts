@@ -20,6 +20,14 @@ const daypartSchema = z.enum([
 ]);
 
 const placeIdSchema = z.string().trim().min(1).max(120);
+export const scheduleItemSchema = z
+  .object({
+    savedPlaceId: placeIdSchema,
+    date: z.iso.date(),
+    startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    durationMinutes: z.number().int().min(15).max(1440),
+  })
+  .strict();
 const savedPlaceIdsSchema = z.array(placeIdSchema).max(12);
 const uniqueSavedPlaceIdsSchema = savedPlaceIdsSchema.refine(
   (values) => new Set(values).size === values.length,
@@ -122,6 +130,11 @@ export const tripChatResponseSchema = z
     }
   });
 
+// @spec CHAT-DATA-011, CHAT-API-014
+export const tripChatResponseV4Schema = tripChatResponseSchema.extend({
+  scheduledItem: scheduleItemSchema.nullable().default(null),
+});
+
 export const tripChatResponseV2Schema = z
   .object({
     message: z.string().trim().min(1).max(2000),
@@ -147,6 +160,7 @@ export const tripChatCandidateResponseSchema = z
       .array(z.string().trim().min(1).max(120))
       .max(12)
       .default([]),
+    scheduledItem: scheduleItemSchema.nullable().default(null),
   })
   .strict();
 
@@ -183,6 +197,7 @@ export const tripChatModelResponseSchema = z
     savedPlaceSources: z.array(savedPlaceSourceModelSchema).max(12),
     suggestions: z.array(suggestedPlaceModelSchema).max(12),
     unresolvedPlaceNames: z.array(z.string()).max(12),
+    scheduledItem: scheduleItemSchema.nullable(),
   })
   .strict();
 
@@ -237,3 +252,4 @@ export const tripChatRequestV2Schema = z
 
 export type TripChatRequest = z.infer<typeof tripChatRequestSchema>;
 export type TripChatResponse = z.infer<typeof tripChatResponseSchema>;
+export type ScheduledItem = z.infer<typeof scheduleItemSchema>;

@@ -9,7 +9,7 @@ import {
   getDevelopmentTripRepository,
 } from "@/lib/trips/repository-memory";
 import { generateShareToken, tripKeyForToken } from "@/lib/trips/token";
-import { NOW, SHARE_TOKEN } from "./fixtures";
+import { makeTripV2, NOW, SHARE_TOKEN } from "./fixtures";
 
 const createBody = {
   title: "San Diego escape",
@@ -116,6 +116,84 @@ it("applies one semantic mutation and returns no-store headers", async () => {
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect((await response.json()).trip.preferences).toEqual(preferences);
+});
+
+// @spec OPT-BE-006, OPT-BE-007
+describe("browser plan proposal mutations", () => {
+  it("generates and atomically stores a proposal against the returned version", async () => {
+    const { handlers, repository } = setup();
+    const trip = makeTripV2();
+    await repository.create(tripKeyForToken(SHARE_TOKEN), {
+      trip,
+      recentMutationIds: [],
+    });
+
+    const response = await handlers.PATCH(
+      request("PATCH", {
+        token: SHARE_TOKEN,
+        body: {
+          baseVersion: trip.version,
+          mutationId: "90cb919a-cf40-49be-8f0c-cf0556bd8bf7",
+          mutation: { type: "generate-plan-proposal" },
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.trip.version).toBe(trip.version + 1);
+    expect(body.trip.proposals).toEqual([
+      expect.objectContaining({
+        status: "pending",
+        baseVersion: trip.version + 1,
+      }),
+    ]);
+  });
+
+  it("returns an explanatory no-op when every eligible place is planned", async () => {
+    const { handlers, repository } = setup();
+    const seed = makeTripV2();
+    const trip = makeTripV2({
+      itinerary: seed.places.map(
+        (
+          place: { id: string; durationMinutes: number | null },
+          index: number,
+        ) => ({
+          id: `planned-${place.id}`,
+          placeId: place.id,
+          date: seed.startDate,
+          startTime: null,
+          durationMinutes: place.durationMinutes,
+          order: index,
+          notes: "",
+          status: "tentative" as const,
+        }),
+      ),
+    });
+    await repository.create(tripKeyForToken(SHARE_TOKEN), {
+      trip,
+      recentMutationIds: [],
+    });
+
+    const response = await handlers.PATCH(
+      request("PATCH", {
+        token: SHARE_TOKEN,
+        body: {
+          baseVersion: trip.version,
+          mutationId: "90cb919a-cf40-49be-8f0c-cf0556bd8bf7",
+          mutation: { type: "generate-plan-proposal" },
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      noChanges: true,
+      message: expect.stringMatching(/already in your plan/i),
+      trip,
+    });
+  });
 });
 
 // @spec TRIP-API-004

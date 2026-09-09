@@ -84,7 +84,7 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/trip/chat",
     expect.objectContaining({
-      headers: expect.objectContaining({ "x-trip-chat-contract": "3" }),
+      headers: expect.objectContaining({ "x-trip-chat-contract": "4" }),
     }),
   );
   expect(screen.getByText("La Jolla Cove")).toBeVisible();
@@ -115,6 +115,61 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
     screen.getByRole("button", { name: "Dismiss La Jolla Cove" }),
   );
   expect(screen.queryByText("La Jolla Cove")).not.toBeInTheDocument();
+});
+
+// @spec CHAT-UI-018, CHAT-UI-019
+it("renders a schedule confirmation and adds its exact itinerary values only after confirmation", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({
+      message: "Ready to confirm.",
+      savedPlaceIds: [],
+      suggestions: [],
+      unresolvedPlaceNames: [],
+      scheduledItem: {
+        savedPlaceId: "place-tacos",
+        date: "2026-09-14",
+        startTime: "09:00",
+        durationMinutes: 120,
+      },
+      tripVersion: 1,
+    }),
+  );
+  const onConfirmSchedule = vi.fn().mockResolvedValue({ status: "saved" });
+  render(
+    <TripChat
+      token={SHARE_TOKEN}
+      trip={makeTripV2()}
+      online
+      onAddSuggestion={vi.fn()}
+      onConfirmSchedule={onConfirmSchedule}
+      onViewSavedPlace={vi.fn()}
+    />,
+  );
+
+  const composer = screen.getByLabelText("Ask about this trip");
+  await waitFor(() => expect(composer).toBeEnabled());
+  fireEvent.change(composer, {
+    target: { value: "Add Tacos to my plan tomorrow at 9 for 2 hours" },
+  });
+  fireEvent.keyDown(composer, { key: "Enter" });
+
+  const card = await screen.findByRole("article", {
+    name: "Schedule Oscar's Mexican Seafood",
+  });
+  expect(card).toHaveTextContent("2026-09-14 · 09:00 · 120 minutes");
+  expect(onConfirmSchedule).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(card).getByRole("button", { name: "Confirm & add to plan" }),
+  );
+  await waitFor(() =>
+    expect(onConfirmSchedule).toHaveBeenCalledWith({
+      savedPlaceId: "place-tacos",
+      date: "2026-09-14",
+      startTime: "09:00",
+      durationMinutes: 120,
+    }),
+  );
+  expect(await within(card).findByText("Added to plan")).toBeVisible();
 });
 
 // @spec CHAT-DATA-001, CHAT-UI-007, CHAT-UI-016, CHAT-UI-017
@@ -418,7 +473,7 @@ it("renders a batch, explains unresolved names, and adds all new cards together"
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/trip/chat",
     expect.objectContaining({
-      headers: expect.objectContaining({ "x-trip-chat-contract": "3" }),
+      headers: expect.objectContaining({ "x-trip-chat-contract": "4" }),
     }),
   );
 });

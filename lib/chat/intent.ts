@@ -9,6 +9,8 @@ const titledPlaceName =
   /\b[A-Z][A-Za-z0-9'&.+-]*(?:\s+(?:[A-Z][A-Za-z0-9'&.+-]*|of|the|and)){1,}\b/;
 const requestedReference =
   /\b(?:find|add|attach|get|provide|give|show|look\s*up)\b[\s\S]{0,50}\b(?:link|url|website|source)\b|\b(?:what|where)(?:'s|\s+is)\b[\s\S]{0,50}\b(?:link|url|website|source)\b|\b(?:link|url|website|source)\b[\s\S]{0,30}\bfor\b/i;
+const scheduleRequest =
+  /\b(?:schedule|put)\b|\badd\b[\s\S]{0,60}\b(?:to|into)\s+(?:my\s+|the\s+)?(?:plan|itinerary)\b/i;
 
 // @spec CHAT-BE-010, CHAT-BE-020
 export function hasExplicitSavedPlaceLookupIntent(message: string) {
@@ -31,6 +33,11 @@ export function hasExplicitAdditionIntent(message: string) {
 // @spec CHAT-BE-031, CHAT-BE-032
 export function hasExplicitLinkEnrichmentIntent(message: string) {
   return requestedReference.test(message);
+}
+
+// @spec CHAT-BE-033
+export function hasExplicitScheduleIntent(message: string) {
+  return scheduleRequest.test(message);
 }
 
 export function hasExplicitSavedPlaceIntent(message: string) {
