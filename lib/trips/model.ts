@@ -100,6 +100,20 @@ export function applyTripMutation(
       };
       break;
     }
+    case "remove-place": {
+      const index = next.places.findIndex(
+        (place) => place.id === mutation.placeId,
+      );
+      if (index < 0) throw new Error("Place does not exist");
+      next.places.splice(index, 1);
+      next.favoritePlaceIds = next.favoritePlaceIds.filter(
+        (id) => id !== mutation.placeId,
+      );
+      next.itinerary = next.itinerary.filter(
+        (item) => item.placeId !== mutation.placeId,
+      );
+      break;
+    }
     case "add-favorite":
       if (!next.places.some((place) => place.id === mutation.placeId)) {
         throw new Error("Place does not exist");

@@ -97,6 +97,9 @@ function mutationIsPresent(trip: TripDocument, mutation: TripApiMutation) {
   if (mutation.type === "remove-itinerary-item") {
     return !trip.itinerary.some((item) => item.id === mutation.itemId);
   }
+  if (mutation.type === "remove-place") {
+    return !trip.places.some((place) => place.id === mutation.placeId);
+  }
   return false;
 }
 function emptyConditions(target: string): ConditionsEnvelope {
@@ -129,6 +132,7 @@ interface PlaceCardProps {
   recommendation?: ReturnType<typeof rankPlaces>[number];
   onFavorite: () => void;
   onAdd: () => void;
+  onRemove?: () => void;
 }
 
 // @spec PLC-UI-001, PLC-UI-002, PLC-UI-003, PLC-UI-004, PLC-UI-005
@@ -139,6 +143,7 @@ function PlaceCard({
   recommendation,
   onFavorite,
   onAdd,
+  onRemove,
 }: PlaceCardProps) {
   const maps = createPlaceMapLinks(place);
   return (
@@ -192,11 +197,11 @@ function PlaceCard({
             onClick={onFavorite}
             aria-label={
               favorite
-                ? `Remove ${place.name} from saved`
-                : `Save ${place.name}`
+                ? `Remove ${place.name} from favorites`
+                : `Favorite ${place.name}`
             }
           >
-            {favorite ? "Saved" : "Save"}
+            {favorite ? "Favorited" : "Favorite"}
           </button>
           <button
             disabled={disabled}
@@ -205,6 +210,16 @@ function PlaceCard({
           >
             Add to plan
           </button>
+          {onRemove && (
+            <button
+              className="danger"
+              disabled={disabled}
+              onClick={onRemove}
+              aria-label={`Remove ${place.name} from Ideas`}
+            >
+              Remove idea
+            </button>
+          )}
           {place.sourceUrl && (
             <a href={place.sourceUrl} target="_blank" rel="noopener noreferrer">
               Visit source
@@ -255,6 +270,7 @@ export function TripWorkspace() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [selectedPlace, setSelectedPlace] = useState<SavedPlace | null>(null);
+  const [removingPlace, setRemovingPlace] = useState<SavedPlace | null>(null);
   const [planDate, setPlanDate] = useState("");
   const [editingItem, setEditingItem] = useState<ItineraryItem | null>(null);
   const [editDate, setEditDate] = useState("");
@@ -624,6 +640,17 @@ export function TripWorkspace() {
 
   async function commit(mutation: TripMutation) {
     await performMutation(mutation);
+  }
+
+  async function removeIdea() {
+    if (!removingPlace) return;
+    const outcome = await performMutation({
+      type: "remove-place",
+      placeId: removingPlace.id,
+    });
+    if (outcome.status === "saved" || outcome.status === "duplicate") {
+      setRemovingPlace(null);
+    }
   }
 
   function openItineraryEditor(item: ItineraryItem) {
@@ -1288,6 +1315,7 @@ export function TripWorkspace() {
                     setSelectedPlace(place);
                     setPlanDate(trip.startDate);
                   }}
+                  onRemove={() => setRemovingPlace(place)}
                 />
               ))}
             </div>
@@ -1511,6 +1539,44 @@ export function TripWorkspace() {
                 }}
               >
                 Add to plan
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {removingPlace && (
+        <div className="modal-backdrop">
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="remove-idea-title"
+          >
+            <h2 id="remove-idea-title">Remove {removingPlace.name}?</h2>
+            {(() => {
+              const plannedCount = trip.itinerary.filter(
+                (item) => item.placeId === removingPlace.id,
+              ).length;
+              return plannedCount ? (
+                <p>
+                  This will also remove {plannedCount} planned{" "}
+                  {plannedCount === 1 ? "stop" : "stops"}.
+                </p>
+              ) : (
+                <p>This removes this idea from the shared trip.</p>
+              );
+            })()}
+            <div className="modal-actions">
+              <button disabled={dirty} onClick={() => setRemovingPlace(null)}>
+                Cancel
+              </button>
+              <button
+                className="danger"
+                disabled={dirty || isOffline}
+                onClick={() => void removeIdea()}
+              >
+                Remove idea
               </button>
             </div>
           </section>

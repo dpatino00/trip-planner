@@ -228,6 +228,7 @@ export type TripMutation =
         >
       >;
     }
+  | { type: "remove-place"; placeId: string }
   | { type: "add-favorite" | "remove-favorite"; placeId: string }
   | { type: "add-itinerary-item"; item: NewItineraryItem }
   | {

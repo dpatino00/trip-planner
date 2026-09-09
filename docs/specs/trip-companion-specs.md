@@ -297,6 +297,8 @@ active gap introduced or changed by the approved conversational design.
 - [ ] **EXP-UI-003**: When a user favorites or unfavorites a saved place while online, the system shall optimistically update the visible favorite state.
 - [x] **EXP-UI-004**: If a favorite mutation fails, then the system shall restore authoritative favorite state and display a retryable error when applicable.
 - [ ] **EXP-UI-005**: Each Ideas card shall provide actions to favorite, add to the itinerary, visit its optional source, and open directions.
+- [x] **EXP-BE-006**: When a shared trip removes a saved idea, the system shall atomically remove that idea, its favorite reference, and every itinerary item that references it.
+- [x] **EXP-UI-006**: Each Ideas card shall identify its shortlist toggle as Favorite or Favorited, offer a Remove idea action, and require confirmation that names any planned stops to be removed.
 - [ ] **PLAN-UI-001**: The Plan view shall display one section for each date in the inclusive trip range.
 - [ ] **PLAN-UI-002**: While the trip range includes the current destination-local date, the Plan view shall visually identify that date.
 - [ ] **PLAN-UI-003**: While an itinerary day has no items, the Plan view shall display guidance for adding a saved place.

@@ -36,6 +36,45 @@ it("treats repeat favorite changes as idempotent no-ops", () => {
   ).toEqual([]);
 });
 
+// @spec EXP-BE-006
+it("removes an idea, its favorite, and all of its planned stops together", () => {
+  const trip = makeTripV2({
+    favoritePlaceIds: ["place-balboa-park"],
+    itinerary: [
+      {
+        id: "balboa-stop",
+        placeId: "place-balboa-park",
+        date: "2026-09-15",
+        startTime: null,
+        durationMinutes: 180,
+        order: 0,
+        notes: "",
+        status: "confirmed",
+      },
+      {
+        id: "tacos-stop",
+        placeId: "place-tacos",
+        date: "2026-09-15",
+        startTime: null,
+        durationMinutes: 60,
+        order: 1,
+        notes: "",
+        status: "confirmed",
+      },
+    ],
+  });
+  const changed = applyTripMutation(trip, {
+    type: "remove-place",
+    placeId: "place-balboa-park",
+  });
+
+  expect(changed.places.map((place) => place.id)).not.toContain(
+    "place-balboa-park",
+  );
+  expect(changed.favoritePlaceIds).not.toContain("place-balboa-park");
+  expect(changed.itinerary.map((item) => item.id)).toEqual(["tacos-stop"]);
+});
+
 // @spec PLAN-BE-001, PLAN-BE-003
 describe("itinerary mutation validation", () => {
   it("requires a complete day order and an existing update target", () => {

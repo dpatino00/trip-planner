@@ -538,16 +538,52 @@ test("optimistically favorites a place and exposes all card actions", async ({
   await page.goto(`/trip#${SHARE_TOKEN}`);
   await page.getByRole("link", { name: "Ideas" }).click();
   const card = page.getByRole("article", { name: "Balboa Park" });
-  const favorite = card.getByRole("button", { name: "Save Balboa Park" });
+  const favorite = card.getByRole("button", { name: "Favorite Balboa Park" });
   await favorite.click();
   await expect(
-    card.getByRole("button", { name: "Remove Balboa Park from saved" }),
+    card.getByRole("button", { name: "Remove Balboa Park from favorites" }),
   ).toBeVisible();
   await expect(
     card.getByRole("button", { name: "Add Balboa Park to plan" }),
   ).toBeVisible();
   await expect(card.getByRole("link", { name: "Visit source" })).toBeVisible();
   await expect(card.getByRole("link", { name: /maps/i }).first()).toBeVisible();
+});
+
+// @spec EXP-UI-006, EXP-BE-006
+test("confirms and removes an idea with its planned stops", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend(
+    makeTripV2({
+      favoritePlaceIds: ["place-balboa-park"],
+      itinerary: [
+        {
+          id: "balboa-stop",
+          placeId: "place-balboa-park",
+          date: "2026-09-15",
+          startTime: null,
+          durationMinutes: 180,
+          order: 0,
+          notes: "",
+          status: "confirmed",
+        },
+      ],
+    }),
+  );
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  await page.getByRole("link", { name: "Ideas" }).click();
+  const card = page.getByRole("article", { name: "Balboa Park" });
+  await card
+    .getByRole("button", { name: "Remove Balboa Park from Ideas" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Remove Balboa Park?" });
+  await expect(dialog).toHaveText(/also remove 1 planned stop/i);
+  await dialog.getByRole("button", { name: "Remove idea" }).click();
+  await expect(card).toHaveCount(0);
+  expect(backend.getTrip().favoritePlaceIds).not.toContain("place-balboa-park");
+  expect(backend.getTrip().itinerary).toHaveLength(0);
 });
 
 // @spec PLAN-UI-001, PLAN-UI-002, PLAN-UI-003, PLAN-UI-011
@@ -818,7 +854,7 @@ test("keeps cached essentials readable but disables mutation offline", async ({
   await expect(page.getByText("San Diego escape")).toBeVisible();
   await expect(page.getByText(/offline.*stale/i)).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /save/i }).first(),
+    page.getByRole("button", { name: /favorite/i }).first(),
   ).toBeDisabled();
   await expect(
     page.getByRole("link", { name: /directions/i }).first(),
