@@ -218,8 +218,8 @@ test("keeps saved ideas out of general discovery searches", async ({
   expect(backend.getTrip()).toEqual(makeTripV2());
 });
 
-// @spec CHAT-BE-002, CHAT-BE-015, CHAT-BE-016, CHAT-BE-019, CHAT-API-011, CHAT-UI-010
-test("automatically adds and renders a verified source for an unsourced saved match", async ({
+// @spec CHAT-BE-002, CHAT-BE-015, CHAT-BE-016, CHAT-BE-019, CHAT-BE-031, CHAT-API-011, CHAT-UI-010
+test("explicitly adds and renders a verified source for an unsourced saved match", async ({
   page,
 }) => {
   const backend = createMockTripBackend();
@@ -235,7 +235,7 @@ test("automatically adds and renders a verified source for an unsourced saved ma
   await page.getByRole("link", { name: "Ask" }).click();
   await page
     .getByLabel("Ask about this trip")
-    .fill("Tell me about Torrey Pines");
+    .fill("Find a link for my saved Torrey Pines idea");
   await page.getByRole("button", { name: "Send" }).click();
 
   const match = page.getByTestId("saved-match-card");

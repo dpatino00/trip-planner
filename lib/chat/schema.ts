@@ -193,11 +193,12 @@ const historyItemSchema = z
   })
   .strict();
 
-// @spec CHAT-API-001, CHAT-API-004, CHAT-DATA-008
+// @spec CHAT-API-001, CHAT-API-004, CHAT-API-013, CHAT-DATA-008
 export const tripChatRequestSchema = z
   .object({
     message: z.string().trim().min(1).max(8000),
     history: z.array(historyItemSchema).max(8),
+    createCards: z.boolean().optional().default(false),
   })
   .strict()
   .superRefine((value, context) => {
@@ -214,9 +215,25 @@ export const tripChatRequestSchema = z
     }
   });
 
-export const tripChatRequestV2Schema = tripChatRequestSchema.safeExtend({
-  message: z.string().trim().min(1).max(2000),
-});
+export const tripChatRequestV2Schema = z
+  .object({
+    message: z.string().trim().min(1).max(2000),
+    history: z.array(historyItemSchema).max(8),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const characters = value.history.reduce(
+      (total, item) => total + item.content.length,
+      0,
+    );
+    if (characters > 8000) {
+      context.addIssue({
+        code: "custom",
+        path: ["history"],
+        message: "History exceeds 8,000 characters",
+      });
+    }
+  });
 
 export type TripChatRequest = z.infer<typeof tripChatRequestSchema>;
 export type TripChatResponse = z.infer<typeof tripChatResponseSchema>;

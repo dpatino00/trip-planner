@@ -52,7 +52,7 @@ export function buildChatHistory(messages: ChatSessionMessage[]) {
   return newestFirst.reverse();
 }
 
-// @spec CHAT-DATA-004, CHAT-API-011, CHAT-API-012, CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-008, CHAT-UI-009, CHAT-UI-010, CHAT-UI-012, CHAT-UI-013, CHAT-UI-014, PWA-UI-007
+// @spec CHAT-DATA-004, CHAT-API-001, CHAT-API-011, CHAT-API-012, CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-008, CHAT-UI-009, CHAT-UI-010, CHAT-UI-012, CHAT-UI-013, CHAT-UI-014, CHAT-UI-016, PWA-UI-007
 export function TripChat({
   token,
   trip,
@@ -64,6 +64,7 @@ export function TripChat({
 }: TripChatProps) {
   const [messages, setMessages] = useState<ChatSessionMessage[]>([]);
   const [composer, setComposer] = useState("");
+  const [createCards, setCreateCards] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [statuses, setStatuses] = useState<Record<string, SuggestionStatus>>(
@@ -110,8 +111,10 @@ export function TripChat({
       unresolvedPlaceNames: [],
     };
     const history = buildChatHistory(messages);
+    const requestCards = createCards;
     setMessages((current) => [...current, userMessage].slice(-12));
     setComposer("");
+    setCreateCards(false);
     setError("");
     setLoading(true);
     try {
@@ -122,7 +125,11 @@ export function TripChat({
           "content-type": "application/json",
           "x-trip-chat-contract": "3",
         },
-        body: JSON.stringify({ message, history }),
+        body: JSON.stringify({
+          message,
+          history,
+          ...(requestCards ? { createCards: true } : {}),
+        }),
       });
       const payload = (await response.json()) as unknown;
       if (!response.ok) {
@@ -230,6 +237,7 @@ export function TripChat({
     skipNextSave.current = true;
     setMessages([]);
     setComposer("");
+    setCreateCards(false);
     setError("");
     setStatuses({});
   }
@@ -295,6 +303,15 @@ export function TripChat({
         </p>
       ) : null}
       <div className="chat-composer">
+        <label className="chat-card-toggle">
+          <input
+            type="checkbox"
+            checked={createCards}
+            disabled={!online || !hydrated || loading}
+            onChange={(event) => setCreateCards(event.target.checked)}
+          />
+          Create cards
+        </label>
         <label htmlFor="trip-chat-composer" className="visually-hidden">
           Ask about this trip
         </label>

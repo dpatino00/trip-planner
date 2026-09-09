@@ -207,7 +207,7 @@ it("authenticates before storage and distinguishes an unknown trip", async () =>
   ).toBe(404);
 });
 
-// @spec CHAT-API-001, CHAT-API-004, CHAT-API-005, CHAT-DATA-008
+// @spec CHAT-API-001, CHAT-API-004, CHAT-API-005, CHAT-API-013, CHAT-DATA-008
 describe("chat input boundaries", () => {
   it.each([
     { message: "", history: [] },
@@ -247,6 +247,40 @@ describe("chat input boundaries", () => {
     expect(
       JSON.stringify(vi.mocked(model!.generate).mock.calls[0][0].history),
     ).not.toMatch(/savedPlaceIds|suggestions|unresolvedPlaceNames/);
+  });
+
+  it("accepts createCards only for the version-3 request contract", async () => {
+    const current = await setup();
+    const accepted = await current.POST(
+      chatRequest(
+        {
+          message: "Shakespeare in the Park on Friday",
+          history: [],
+          createCards: true,
+        },
+        { token: SHARE_TOKEN, contractVersion: 3 },
+      ),
+    );
+    expect(accepted.status).toBe(200);
+    expect(current.model!.generate).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "card" }),
+    );
+
+    for (const contractVersion of [2, null] as const) {
+      const legacy = await setup();
+      const rejected = await legacy.POST(
+        chatRequest(
+          {
+            message: "Shakespeare in the Park on Friday",
+            history: [],
+            createCards: true,
+          },
+          { token: SHARE_TOKEN, contractVersion },
+        ),
+      );
+      expect(rejected.status).toBe(400);
+      expect(legacy.model!.generate).not.toHaveBeenCalled();
+    }
   });
 
   it("retains the 2,000-character limit for version-2 clients", async () => {
@@ -387,8 +421,8 @@ it("fails closed for configuration, timeout, and malformed model output", async 
   ).toBe(502);
 });
 
-// @spec CHAT-API-009
-it("uses a forty-five-second timeout only for explicit addition batches", async () => {
+// @spec CHAT-API-009, CHAT-BE-029
+it("uses a forty-five-second timeout for addition and explicit-card modes", async () => {
   vi.useFakeTimers();
   try {
     const hanging: TripChatModel = {
@@ -422,9 +456,77 @@ it("uses a forty-five-second timeout only for explicit addition batches", async 
     expect(additionSettled).toBe(false);
     await vi.advanceTimersByTimeAsync(25_000);
     expect((await additionResponse).status).toBe(504);
+
+    let cardSettled = false;
+    const cardResponse = POST(
+      chatRequest(
+        {
+          message: "Shakespeare in the Park on Friday",
+          history: [],
+          createCards: true,
+        },
+        { token: SHARE_TOKEN },
+      ),
+    ).then((response) => {
+      cardSettled = true;
+      return response;
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(cardSettled).toBe(false);
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect((await cardResponse).status).toBe(504);
   } finally {
     vi.useRealTimers();
   }
+});
+
+// @spec CHAT-DATA-001, CHAT-DATA-005, CHAT-BE-013, CHAT-BE-029, CHAT-BE-030
+it("returns an unsourced event card when explicit-card mode is requested", async () => {
+  const event = {
+    ...suggestion,
+    name: "Shakespeare in the Park",
+    summary:
+      "An outdoor Shakespeare performance named by the traveler for Friday evening. Schedule and availability details remain unverified.",
+    locality: "Balboa Park",
+    interests: ["culture"],
+    tags: ["theater", "outdoor", "event"],
+    profile: "outdoor",
+    preferredDayparts: ["evening"],
+    durationMinutes: 150,
+    costLevel: null,
+    reservationRecommended: null,
+    sourceUrl: null,
+  };
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "I made a card for the named event.",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [event],
+        unresolvedPlaceNames: [],
+      },
+      sources: [],
+    }),
+  };
+  const { POST } = await setup({ model });
+
+  const response = await POST(
+    chatRequest(
+      {
+        message: "Shakespeare in the Park on Friday",
+        history: [],
+        createCards: true,
+      },
+      { token: SHARE_TOKEN },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ suggestions: [event] });
+  expect(model.generate).toHaveBeenCalledWith(
+    expect.objectContaining({ mode: "card" }),
+  );
 });
 
 // @spec CHAT-DATA-001, CHAT-DATA-005, CHAT-BE-009, CHAT-BE-013, SEC-API-006
@@ -847,8 +949,8 @@ it("requires saved-place source candidates and an authoritative trip version in 
   ).toBe(false);
 });
 
-// @spec CHAT-BE-002, CHAT-BE-013, CHAT-BE-015, CHAT-BE-016, CHAT-BE-019, CHAT-API-011
-it("atomically adds a current-search source to a matched saved place without changing the plan", async () => {
+// @spec CHAT-BE-002, CHAT-BE-013, CHAT-BE-015, CHAT-BE-016, CHAT-BE-019, CHAT-BE-031, CHAT-API-011
+it("explicitly adds a current-search source to a matched saved idea without changing the plan", async () => {
   const sourceUrl = "https://www.parks.ca.gov/torreypines";
   const trip = makeTripV2();
   const model: TripChatModel = {
@@ -867,7 +969,7 @@ it("atomically adds a current-search source to a matched saved place without cha
 
   const response = await POST(
     chatRequest(
-      { message: "Tell me about my saved Torrey Pines idea", history: [] },
+      { message: "Find a link for my saved Torrey Pines idea", history: [] },
       { token: SHARE_TOKEN },
     ),
   );
@@ -905,6 +1007,42 @@ it("atomically adds a current-search source to a matched saved place without cha
   expect(changed.itinerary).toEqual(trip.itinerary);
   expect(changed.proposals).toEqual(trip.proposals);
   expect(stored!.recentMutationIds).toEqual([]);
+  expect(model.generate).toHaveBeenCalledWith(
+    expect.objectContaining({ mode: "link" }),
+  );
+});
+
+// @spec CHAT-BE-002, CHAT-BE-010, CHAT-BE-032
+it("does not enrich a source when a saved idea is merely mentioned", async () => {
+  const sourceUrl = "https://www.parks.ca.gov/torreypines";
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Torrey Pines is already in your Ideas.",
+        savedPlaceIds: ["place-torrey-pines"],
+        savedPlaceSources: [{ savedPlaceId: "place-torrey-pines", sourceUrl }],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+      },
+      sources: [sourceUrl],
+    }),
+  };
+  const { POST, repository } = await setup({ model });
+  const update = vi.spyOn(repository, "update");
+
+  const response = await POST(
+    chatRequest(
+      { message: "Tell me about my saved Torrey Pines idea", history: [] },
+      { token: SHARE_TOKEN },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).tripVersion).toBe(1);
+  expect(update).not.toHaveBeenCalled();
+  expect(model.generate).toHaveBeenCalledWith(
+    expect.objectContaining({ mode: "standard" }),
+  );
 });
 
 // @spec CHAT-BE-013, CHAT-BE-015, CHAT-BE-018
@@ -935,7 +1073,10 @@ it("discards unsearched, unreturned, and already-sourced saved-place candidates"
 
   const response = await POST(
     chatRequest(
-      { message: `Use ${unsearchedUrl}`, history: [] },
+      {
+        message: `Find a link for my saved Torrey Pines idea; do not use ${unsearchedUrl}`,
+        history: [],
+      },
       { token: SHARE_TOKEN },
     ),
   );
@@ -987,7 +1128,7 @@ it("retries source enrichment once against a concurrent trip without overwriting
 
   const response = await POST(
     chatRequest(
-      { message: "What about my saved Torrey Pines idea?", history: [] },
+      { message: "Find a link for my saved Torrey Pines idea", history: [] },
       { token: SHARE_TOKEN },
     ),
   );
@@ -1042,7 +1183,7 @@ it("stops after two source-enrichment conflicts and returns the latest trip vers
 
   const response = await POST(
     chatRequest(
-      { message: "What about my saved Torrey Pines idea?", history: [] },
+      { message: "Find a link for my saved Torrey Pines idea", history: [] },
       { token: SHARE_TOKEN },
     ),
   );

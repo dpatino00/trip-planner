@@ -1,7 +1,7 @@
 # Conversational Trip Companion — Low-Level Design
 
 **Created**: 2026-09-01
-**Last updated**: 2026-09-07
+**Last updated**: 2026-09-08
 **Related HLD**: [Conversational Trip Companion — High-Level Design](../high-level-design.md)
 
 ## Context and Design Philosophy
@@ -385,11 +385,21 @@ or endpoint is introduced.
 
 `POST /api/trip/chat` authenticates `Authorization: Bearer <trip-token>` and
 uses `x-trip-chat-contract` to select request and response validation. Contract
-version three accepts a trimmed 1–8,000 character `message`; version two and
-headerless requests retain the 2,000-character limit. Every version accepts at
-most eight prior user or assistant text messages, each 1–2,000 characters, with
-combined history capped at 8,000 characters. Version-three bodies above 32 KiB
-and older bodies above 16 KiB are rejected.
+version three accepts a trimmed 1–8,000 character `message` and an optional
+boolean `createCards` field that defaults to `false`; version two and headerless
+requests retain the 2,000-character message limit and reject that additive
+field. Every version accepts at most eight prior user or assistant text
+messages, each 1–2,000 characters, with combined history capped at 8,000
+characters. Version-three bodies above 32 KiB and older bodies above 16 KiB are
+rejected.
+
+```ts
+interface TripChatRequestV3 {
+  message: string;
+  history: Array<{ role: "user" | "assistant"; content: string }>;
+  createCards?: boolean;
+}
+```
 
 The client never submits a trip document. After authentication, the route loads
 the authoritative trip and constructs a compact context containing title,
@@ -437,6 +447,14 @@ interface TripChatModelResponse {
 }
 ```
 
+`SuggestedPlace` remains the transport and storage-adapter name for backward
+compatibility, but its product meaning is a generic trip idea. A place, event,
+or activity uses the same validated fields: the title is `name`; venue or area
+may use `locality`; and dates, times, event character, or other useful supplied
+details belong in `summary` and tags. Event-specific persistence fields and a
+schema migration are not introduced. Cards never imply live availability or
+verification.
+
 All strict Structured Output properties are required; nullable properties
 represent optional concepts. The narrative message remains capped at 2,000
 characters. Each result array is individually capped at twelve, and the combined
@@ -454,23 +472,38 @@ at twelve. The route accepts a saved-place source only when the ID is a valid
 returned match, the authoritative place still has no source URL, and the exact
 HTTPS URL occurs in the current response's bounded web-search evidence.
 
-The server separates explicit addition intent from saved-place lookup intent.
-An `add`, `save`, `include`, `keep`, or `import` request enables addition mode
-regardless of whether the names appear in prose, lines, bullets, or a table.
-Addition mode may return saved IDs and new suggestions together and accounts for
-up to twelve places. It preserves relevant user-supplied hours, prices, deals,
-and character as concise summary text without presenting those details as
-independently verified. An identifiable suggestion remains reviewable when no
-source is found; its `sourceUrl` becomes null and the UI supplies Maps links.
+The server separates standard, addition, explicit-card, and link-enrichment
+intent. Existing `add`, `save`, `include`, `keep`, or `import` detection retains
+addition mode regardless of whether names appear in prose, lines, bullets, or a
+table. For a version-three request, `createCards: true` selects explicit-card
+mode independently of message wording and takes precedence over inferred
+addition mode. Explicit-card mode creates results only for the first twelve
+named places, events, or activities in the current message; it does not turn an
+open-ended request into recommendations. Addition and explicit-card modes may
+return saved IDs and new suggestions together. Both preserve relevant supplied
+dates, hours, prices, deals, and character as concise summary text without
+presenting volatile details as independently verified. An identifiable
+suggestion remains reviewable when no source is found; its `sourceUrl` becomes
+null and the UI supplies Maps links.
 
-Saved-place lookup without addition intent retains the existing behavior: up to
-three ranked authoritative matches suppress new suggestions. General discovery
+Link-enrichment intent requires the current message to explicitly request a
+link, URL, website, or source for a named saved idea. Phrases such as “find a
+link for,” “add the website for,” and “what is the URL for” qualify; merely
+mentioning or discussing a saved idea does not. This mode returns authoritative
+saved IDs only, performs at most one web search for all named targets, and emits
+source candidates only for matched saved ideas whose authoritative `sourceUrl`
+is null. It never creates a new suggestion or unresolved-name mutation control.
+
+Saved-place lookup without addition, explicit-card, or link-enrichment intent
+retains the existing behavior: up to three ranked authoritative matches suppress
+new suggestions and do not trigger link enrichment. General discovery
 returns no saved IDs, excludes exact saved duplicates, and returns at most three
 new suggestions. Every general-discovery suggestion must carry a non-null HTTPS
 URL that exactly matches current web-search evidence; an unsourced or ungrounded
 candidate is discarded. URLs found only in context, input, history, or narrative
-never count as evidence. In addition mode, an ungrounded candidate URL is
-stripped while the otherwise valid suggestion is retained as Maps-only.
+never count as evidence. In addition or explicit-card mode, an ungrounded
+candidate URL is stripped while the otherwise valid suggestion is retained as
+Maps-only.
 
 The current browser sends `x-trip-chat-contract: 3`. It receives all five
 version-three fields. A version-two request receives its prior four-field shape,
@@ -479,29 +512,32 @@ headerless request receives only `message` and up to three sourced suggestions.
 This rolling-compatibility rule prevents cached clients from rejecting additive
 fields while they age out.
 
-After validation, the chat handler applies all accepted saved-place source URLs
-in one repository compare-and-set operation. It starts from the latest complete
-trip document, changes only `sourceUrl` and the place/document update timestamps,
-and increments the trip version once regardless of how many links are added. It
-preserves recent mutation IDs and does not run itinerary optimization because
-reference metadata does not affect ranking or scheduling. On a version conflict,
-the handler reloads once and retries only candidates whose places still exist and
-still have no source URL. It never overwrites a URL added concurrently. If the
-retry also conflicts, Ask still returns its validated narrative and saved matches
-with the latest known `tripVersion`, but reports no source as persisted.
+Only in link-enrichment mode, the chat handler applies accepted saved-idea source
+URLs in one repository compare-and-set operation. It starts from the latest
+complete trip document, changes only `sourceUrl` and the idea/document update
+timestamps, and increments the trip version once regardless of how many links
+are added. It preserves recent mutation IDs and does not run itinerary
+optimization because reference metadata does not affect ranking or scheduling.
+On a version conflict, the handler reloads once and retries only candidates whose
+ideas still exist and still have no source URL. It never overwrites a URL added
+concurrently. If the retry also conflicts, Ask still returns its validated
+narrative and saved matches with the latest known `tripVersion`, but does not
+claim that a source was persisted.
 
 The injected `TripChatModel` production adapter uses the OpenAI Node SDK,
 `responses.parse()` with `zodTextFormat`, `store: false`, and the configured
-`OPENAI_MODEL`. Standard mode keeps the 1,600-token output cap, one low-context
-web-search call, and 20-second timeout. Addition mode uses a 5,000-token cap, at
-most four low-context web-search calls, and a 45-second timeout. Both modes use
-one model request and expose no arbitrary HTTP or mutation tools. Invalid,
-incomplete, or refused output returns `502`; timeout returns `504`; missing
-server configuration or unavailable model/storage returns `503`.
+`OPENAI_MODEL`. Standard and link-enrichment modes keep the 1,600-token output
+cap, at most one low-context web-search call, and 20-second timeout. Addition and
+explicit-card modes use a 5,000-token cap, at most four low-context web-search
+calls, and a 45-second timeout. Every mode uses one model request and exposes no
+arbitrary HTTP or mutation tools. Invalid, incomplete, or refused output returns
+`502`; timeout returns `504`; missing server configuration or unavailable
+model/storage returns `503`.
 
-A suggestion card renders `Learn more` only for a verified source and always
-renders generated Apple Maps, Google Maps, and Directions links. Individual Add
-to trip retains `add-suggested-place`. Add all new sends one versioned
+A suggestion card uses the neutral eyebrow **TRIP IDEA · DETAILS UNVERIFIED**,
+renders `Learn more` only for a verified source, and always renders generated
+Apple Maps, Google Maps, and Directions links. Individual Add to trip retains
+`add-suggested-place`. Add all new sends one versioned
 `add-suggested-places` mutation containing 1–12 suggestions. The server
 normalizes them in order against the authoritative trip and earlier batch
 entries, skips exact name/locality duplicates, and writes all remaining places
@@ -709,20 +745,26 @@ travel-marketing slogans or metaphors.
 
 Ask owns its composer, loading, error, messages, inline saved-match cards, and
 inline suggestion cards. Enter submits, Shift+Enter inserts a newline, and
-generation/add controls are disabled offline. Saved-match cards resolve IDs
-against the current authoritative trip in the browser and display the saved
-name, existing summary, useful tags, optional reference, Maps and directions
-links, and a lightweight **View in Ideas** action. After a successful Ask
-response, the client compares `tripVersion` with its loaded trip and revalidates
-when the server has a newer version, so an automatically added **Visit source**
-link is rendered from refreshed authoritative trip data rather than a model
-copy. Saved-match cards expose no manual mutation or scheduling controls and
-remain readable offline, with external links labeled as requiring connection.
-If a saved place is no longer present, its stale session ID renders no card.
-Suggestion cards provide generated Apple Maps, Google Maps, and Google Maps
-directions links before confirmation, plus a supplied source link when present.
-They retain explicit **Add to trip** and session-local **Dismiss** controls and
-expose saved, duplicate, or retry states.
+generation/add controls are disabled offline. A labeled **Create cards**
+checkbox sits with the composer. It defaults off, applies only to the next
+submitted message, is included as `createCards: true` in that request, and
+resets immediately when the client accepts the submission even if generation
+later fails. Saved chat history stores only role and text, not the control state.
+
+Saved-match cards resolve IDs against the current authoritative trip in the
+browser and display the saved name, existing summary, useful tags, optional
+reference, Maps and directions links, and a lightweight **View in Ideas**
+action. After successful explicit link enrichment, the client compares
+`tripVersion` with its loaded trip and revalidates when the server has a newer
+version, so the added **Visit source** link is rendered from refreshed
+authoritative trip data rather than a model copy. Saved-match cards expose no
+manual mutation or scheduling controls and remain readable offline, with
+external links labeled as requiring connection. If a saved idea is no longer
+present, its stale session ID renders no card. Suggestion cards provide generated
+Apple Maps, Google Maps, and Google Maps directions links before confirmation,
+plus a supplied source link when present. They retain explicit **Add to trip**
+and session-local **Dismiss** controls and expose saved, duplicate, or retry
+states.
 
 When an assistant response contains more than one new suggestion, Ask also shows
 **Add all new**. Activating it sends one atomic batch mutation and marks each
@@ -831,14 +873,16 @@ writes and chat generation are not queued. Session-local chat remains readable.
 | Missing chat configuration                        | Return retryable `503 configuration-unavailable` without configuration values.            |
 | Chat allowance exhausted                          | Return retryable `429 rate-limited`.                                                      |
 | Standard model timeout                            | Return retryable `504 model-timeout` after 20 seconds.                                    |
-| Addition-mode model timeout                       | Return retryable `504 model-timeout` after 45 seconds.                                    |
+| Addition- or explicit-card-mode timeout           | Return retryable `504 model-timeout` after 45 seconds.                                    |
 | Invalid, incomplete, or refused AI output         | Return retryable `502 model-invalid-response`; do not expose partial suggestions.         |
-| More than twelve identifiable addition entries    | Process the first twelve and state that remaining entries were not processed.             |
-| Addition entry cannot be identified               | Return its bounded name under Needs clarification without a mutation control.             |
-| Addition suggestion has no verified source        | Retain a details-unverified card with Maps links and no Learn more action.                |
+| More than twelve identifiable card-mode entries   | Process the first twelve and state that remaining entries were not processed.             |
+| Named card-mode entry cannot be identified        | Return its bounded name under Needs clarification without a mutation control.             |
+| Card-mode suggestion has no verified source       | Retain a details-unverified card with Maps links and no Learn more action.                |
+| Create cards is enabled for an open-ended request | Return narrative guidance without inventing unnamed cards.                                |
 | Bulk addition contains malformed suggestion data  | Return non-retryable `400 invalid-mutation`; perform no write.                            |
-| Saved-place source has no current search evidence | Discard it and leave the saved place unchanged.                                           |
-| Saved place already has a source URL              | Preserve the existing URL and discard the enrichment candidate.                           |
+| Link request names no matching saved idea         | Return narrative clarification and perform no trip mutation.                              |
+| Saved-idea source has no current search evidence  | Discard it and leave the saved idea unchanged.                                            |
+| Saved idea already has a source URL               | Preserve the existing URL and discard the enrichment candidate.                           |
 | Source enrichment conflicts twice                 | Return Ask results using the latest known trip version without claiming a link was saved. |
 | Legacy place cannot be migrated                   | Render an unavailable placeholder; never crash or silently delete the itinerary item.     |
 

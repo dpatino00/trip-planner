@@ -52,8 +52,14 @@ export async function mockTripApi(
     json(route, makeConditionsV2()),
   );
   await page.route("**/api/trip/chat", (route) => {
-    const request = route.request().postDataJSON() as { message?: string };
-    if (/torrey pines/i.test(request.message ?? "")) {
+    const request = route.request().postDataJSON() as {
+      message?: string;
+      createCards?: boolean;
+    };
+    if (
+      /torrey pines/i.test(request.message ?? "") &&
+      /link|url|website|source/i.test(request.message ?? "")
+    ) {
       const current = backend.getTrip();
       const sourceUrl = "https://www.parks.ca.gov/torreypines";
       const trip = {

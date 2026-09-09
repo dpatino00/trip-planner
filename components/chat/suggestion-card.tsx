@@ -12,7 +12,7 @@ interface SuggestionCardProps {
   onDismiss: () => void;
 }
 
-// @spec CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-007, PLC-BE-005
+// @spec CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-007, CHAT-UI-017, PLC-BE-005
 export function SuggestionCard({
   suggestion,
   status,
@@ -34,7 +34,7 @@ export function SuggestionCard({
             : "";
   return (
     <article className="suggestion-card" aria-label={suggestion.name}>
-      <p className="eyebrow">PLACE SUGGESTION · DETAILS UNVERIFIED</p>
+      <p className="eyebrow">TRIP IDEA · DETAILS UNVERIFIED</p>
       <h3>{suggestion.name}</h3>
       {suggestion.locality ? (
         <p className="suggestion-locality">{suggestion.locality}</p>
