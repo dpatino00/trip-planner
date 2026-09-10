@@ -6,6 +6,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 
 import { TripChat } from "@/components/chat/trip-chat";
+import { TripReadiness } from "@/components/trip-readiness";
+import type { ScheduledItem } from "@/lib/chat/schema";
 import {
   loadTripSnapshot,
   removeTripSnapshot,
@@ -15,6 +17,14 @@ import { registerServiceWorker } from "@/lib/offline/register-service-worker";
 import { createPlaceMapLinks } from "@/lib/places/links";
 import { rankPlaces } from "@/lib/recommendations/scoring";
 import { tripCopy } from "@/lib/ui/copy";
+import {
+  activeIdeaFilterCount,
+  emptyIdeaFilters,
+  filterIdeas,
+  readIdeaFilters,
+  type IdeaFilters,
+  writeIdeaFilters,
+} from "@/lib/ui/ideas-filters";
 import type { GeocodingResult } from "@/lib/geocoding/open-meteo";
 import type {
   ConditionsEnvelope,
@@ -30,6 +40,7 @@ import {
   createTripRefreshPolicy,
   mutateTripWithRetry,
 } from "@/lib/trips/client";
+import { getTripReadiness } from "@/lib/trips/readiness";
 
 type View = "today" | "ideas" | "plan" | "ask";
 const tokenPattern = /^[A-Za-z0-9_-]{22}$/;
@@ -277,9 +288,10 @@ export function TripWorkspace() {
   const [editStartTime, setEditStartTime] = useState("");
   const [editDurationMinutes, setEditDurationMinutes] = useState("");
   const [editNotes, setEditNotes] = useState("");
-  const [search, setSearch] = useState("");
-  const [interest, setInterest] = useState("");
+  const [ideaFilters, setIdeaFilterState] =
+    useState<IdeaFilters>(emptyIdeaFilters);
   const [mutationError, setMutationError] = useState("");
+  const [planProposalMessage, setPlanProposalMessage] = useState("");
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   const deleteTriggerRef = useRef<HTMLButtonElement>(null);
@@ -332,8 +344,7 @@ export function TripWorkspace() {
         ) {
           setView(initialView);
         }
-        setSearch(params.get("search") ?? "");
-        setInterest(params.get("interest") ?? "");
+        setIdeaFilterState(readIdeaFilters(params));
         setToken(found);
         setOnline(reachable);
         setFragmentReady(true);
@@ -348,6 +359,19 @@ export function TripWorkspace() {
       window.removeEventListener("online", connect);
       window.removeEventListener("offline", disconnect);
     };
+  }, []);
+
+  useEffect(() => {
+    function restoreUrlState() {
+      const params = new URLSearchParams(window.location.search);
+      const nextView = params.get("view");
+      if (nextView === "ideas" || nextView === "plan" || nextView === "ask")
+        setView(nextView);
+      else setView("today");
+      setIdeaFilterState(readIdeaFilters(params));
+    }
+    window.addEventListener("popstate", restoreUrlState);
+    return () => window.removeEventListener("popstate", restoreUrlState);
   }, []);
 
   const tripState = useSWR<{ trip: TripDocument; cached?: boolean }>(
@@ -458,14 +482,17 @@ export function TripWorkspace() {
     history.pushState(null, "", `?${params.toString()}#${token}`);
   }
   function setIdeaFilters(nextSearch: string, nextInterest: string) {
-    setSearch(nextSearch);
-    setInterest(nextInterest);
+    updateIdeaFilters({
+      ...ideaFilters,
+      search: nextSearch,
+      interest: nextInterest,
+    });
+  }
+  function updateIdeaFilters(next: IdeaFilters) {
+    setIdeaFilterState(next);
     const params = new URLSearchParams(window.location.search);
     params.set("view", "ideas");
-    if (nextSearch) params.set("search", nextSearch);
-    else params.delete("search");
-    if (nextInterest) params.set("interest", nextInterest);
-    else params.delete("interest");
+    writeIdeaFilters(params, next);
     history.replaceState(null, "", `?${params.toString()}#${token}`);
   }
 
@@ -474,12 +501,11 @@ export function TripWorkspace() {
     const place = placeById.get(placeId);
     if (!place) return;
     setView("ideas");
-    setSearch(place.name);
-    setInterest("");
+    const nextFilters = { ...emptyIdeaFilters, search: place.name };
+    setIdeaFilterState(nextFilters);
     const params = new URLSearchParams(window.location.search);
     params.set("view", "ideas");
-    params.set("search", place.name);
-    params.delete("interest");
+    writeIdeaFilters(params, nextFilters);
     history.pushState(null, "", `?${params.toString()}#${token}`);
   }
 
@@ -510,6 +536,8 @@ export function TripWorkspace() {
             status: response.status,
             trip: payload.trip,
             duplicate: payload.duplicate,
+            noChanges: payload.noChanges,
+            message: payload.message,
           };
         },
       });
@@ -526,6 +554,8 @@ export function TripWorkspace() {
       return {
         status: outcome.duplicate ? ("duplicate" as const) : ("saved" as const),
         trip: outcome.trip,
+        noChanges: outcome.noChanges,
+        message: outcome.message,
       };
     } catch (cause) {
       try {
@@ -642,6 +672,17 @@ export function TripWorkspace() {
     await performMutation(mutation);
   }
 
+  async function generatePlanProposal() {
+    setPlanProposalMessage("");
+    const outcome = await performMutation({ type: "generate-plan-proposal" });
+    if (outcome.status === "saved" && outcome.noChanges) {
+      setPlanProposalMessage(
+        outcome.message ??
+          "Every eligible saved place is already in your plan.",
+      );
+    }
+  }
+
   async function removeIdea() {
     if (!removingPlace) return;
     const outcome = await performMutation({
@@ -755,6 +796,21 @@ export function TripWorkspace() {
       }
       return outcome;
     })();
+  }
+
+  // @spec CHAT-UI-019
+  async function confirmChatSchedule(scheduledItem: ScheduledItem) {
+    return performMutation({
+      type: "add-itinerary-item",
+      item: {
+        placeId: scheduledItem.savedPlaceId,
+        date: scheduledItem.date,
+        startTime: scheduledItem.startTime,
+        durationMinutes: scheduledItem.durationMinutes,
+        notes: "",
+        status: "confirmed",
+      },
+    });
   }
 
   // @spec CHAT-BE-025, CHAT-BE-027, CHAT-BE-028, CHAT-UI-013
@@ -899,18 +955,19 @@ export function TripWorkspace() {
 
   const tripDates = datesBetween(trip.startDate, trip.endDate);
   const today = conditions.requestedFor.slice(0, 10);
-  const visiblePlaces = trip.places.filter((place) => {
-    const query = normalizeSearch(
-      [place.name, place.locality, place.summary, ...place.tags].join(" "),
-    );
-    return (
-      query.includes(normalizeSearch(search)) &&
-      (!interest || place.interests.includes(interest as never))
-    );
-  });
+  const visiblePlaces = filterIdeas(
+    trip.places,
+    trip.favoritePlaceIds,
+    ideaFilters,
+  );
+  const activeFilters = activeIdeaFilterCount(ideaFilters);
   const pendingProposal = trip.proposals.find(
     (proposal) => proposal.status === "pending",
   );
+  const proposalIsStale = Boolean(
+    pendingProposal && pendingProposal.baseVersion !== trip.version,
+  );
+  const readiness = getTripReadiness(trip);
 
   return (
     <div className="workspace">
@@ -1262,9 +1319,9 @@ export function TripWorkspace() {
                 <input
                   type="search"
                   aria-label="Search places"
-                  value={search}
+                  value={ideaFilters.search}
                   onChange={(event) =>
-                    setIdeaFilters(event.target.value, interest)
+                    setIdeaFilters(event.target.value, ideaFilters.interest)
                   }
                 />
               </label>
@@ -1272,9 +1329,9 @@ export function TripWorkspace() {
                 Interest
                 <select
                   aria-label="Interest"
-                  value={interest}
+                  value={ideaFilters.interest}
                   onChange={(event) =>
-                    setIdeaFilters(search, event.target.value)
+                    setIdeaFilters(ideaFilters.search, event.target.value)
                   }
                 >
                   <option value="">All interests</option>
@@ -1295,7 +1352,119 @@ export function TripWorkspace() {
                   ))}
                 </select>
               </label>
+              <label>
+                Cost
+                <select
+                  aria-label="Cost"
+                  value={ideaFilters.cost}
+                  onChange={(event) =>
+                    updateIdeaFilters({
+                      ...ideaFilters,
+                      cost: event.target.value,
+                    })
+                  }
+                >
+                  <option value="">Any cost</option>
+                  <option value="0">Free</option>
+                  <option value="1">$</option>
+                  <option value="2">$$</option>
+                  <option value="3">$$$</option>
+                </select>
+              </label>
+              <label>
+                Duration
+                <select
+                  aria-label="Duration"
+                  value={ideaFilters.duration}
+                  onChange={(event) =>
+                    updateIdeaFilters({
+                      ...ideaFilters,
+                      duration: event.target.value,
+                    })
+                  }
+                >
+                  <option value="">Any duration</option>
+                  <option value="short">Under 90 minutes</option>
+                  <option value="medium">90–180 minutes</option>
+                  <option value="long">More than 180 minutes</option>
+                </select>
+              </label>
+              <label>
+                Place profile
+                <select
+                  aria-label="Place profile"
+                  value={ideaFilters.profile}
+                  onChange={(event) =>
+                    updateIdeaFilters({
+                      ...ideaFilters,
+                      profile: event.target.value,
+                    })
+                  }
+                >
+                  <option value="">All profiles</option>
+                  <option value="indoor">Indoor</option>
+                  <option value="outdoor">Outdoor</option>
+                  <option value="coastal">Coastal</option>
+                  <option value="mixed">Mixed</option>
+                </select>
+              </label>
+              <label>
+                Accessibility
+                <select
+                  aria-label="Accessibility"
+                  value={ideaFilters.accessibility}
+                  onChange={(event) =>
+                    updateIdeaFilters({
+                      ...ideaFilters,
+                      accessibility: event.target.value,
+                    })
+                  }
+                >
+                  <option value="">Any accessibility</option>
+                  <option value="low-walking">Low walking</option>
+                  <option value="step-free">Step-free</option>
+                  <option value="accessible-parking">Accessible parking</option>
+                </select>
+              </label>
+              <label className="filter-check">
+                <input
+                  type="checkbox"
+                  checked={ideaFilters.reservation}
+                  onChange={(event) =>
+                    updateIdeaFilters({
+                      ...ideaFilters,
+                      reservation: event.target.checked,
+                    })
+                  }
+                />
+                Reservation recommended
+              </label>
+              <label className="filter-check">
+                <input
+                  type="checkbox"
+                  checked={ideaFilters.favorites}
+                  onChange={(event) =>
+                    updateIdeaFilters({
+                      ...ideaFilters,
+                      favorites: event.target.checked,
+                    })
+                  }
+                />
+                Favorites only
+              </label>
+              {activeFilters > 0 && (
+                <div className="filter-summary">
+                  <span aria-live="polite">
+                    {activeFilters} active{" "}
+                    {activeFilters === 1 ? "filter" : "filters"}
+                  </span>
+                  <button onClick={() => updateIdeaFilters(emptyIdeaFilters)}>
+                    Clear filters
+                  </button>
+                </div>
+              )}
             </div>
+            {!visiblePlaces.length && <p>No ideas match these filters.</p>}
             <div className="card-grid">
               {visiblePlaces.map((place) => (
                 <PlaceCard
@@ -1329,7 +1498,27 @@ export function TripWorkspace() {
                 <p className="eyebrow">{tripCopy.workspace.plan.eyebrow}</p>
                 <h2>{tripCopy.workspace.plan.heading}</h2>
               </div>
+              <button
+                className="primary"
+                disabled={
+                  isOffline ||
+                  dirty ||
+                  Boolean(pendingProposal && !proposalIsStale)
+                }
+                onClick={() => void generatePlanProposal()}
+              >
+                {dirty
+                  ? tripCopy.workspace.plan.suggesting
+                  : proposalIsStale
+                    ? tripCopy.workspace.plan.regenerate
+                    : tripCopy.workspace.plan.suggest}
+              </button>
             </div>
+            {planProposalMessage && <p role="status">{planProposalMessage}</p>}
+            <TripReadiness
+              readiness={readiness}
+              onViewIdeas={() => changeView("ideas")}
+            />
             {pendingProposal && (
               <section className="trip-snapshot" aria-label="Plan proposal">
                 <p className="eyebrow">
@@ -1341,7 +1530,7 @@ export function TripWorkspace() {
                     <li key={`${change.type}-${index}`}>{change.rationale}</li>
                   ))}
                 </ul>
-                {pendingProposal.baseVersion === trip.version ? (
+                {!proposalIsStale ? (
                   <div className="card-actions">
                     <button
                       className="primary"
@@ -1492,6 +1681,7 @@ export function TripWorkspace() {
             onAddSuggestions={addSuggestedPlaces}
             onViewSavedPlace={viewSavedPlace}
             onTripVersion={refreshTripAfterAsk}
+            onConfirmSchedule={confirmChatSchedule}
           />
         )}
       </main>

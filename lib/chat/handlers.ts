@@ -2,6 +2,7 @@ import { buildTripChatContext } from "@/lib/chat/context";
 import {
   hasExplicitAdditionIntent,
   hasExplicitLinkEnrichmentIntent,
+  hasExplicitScheduleIntent,
   hasExplicitSavedPlaceLookupIntent,
   normalizedPlaceKey,
 } from "@/lib/chat/intent";
@@ -12,6 +13,7 @@ import {
   tripChatRequestSchema,
   tripChatRequestV2Schema,
   tripChatResponseSchema,
+  tripChatResponseV4Schema,
   tripChatResponseV2Schema,
 } from "@/lib/chat/schema";
 import { migrateTripDocument } from "@/lib/trips/migrate";
@@ -192,7 +194,9 @@ export function createTripChatHandler({
 }: Dependencies) {
   return async function POST(request: Request) {
     const contract = request.headers.get("x-trip-chat-contract");
+    const contractV4 = contract === "4";
     const contractV3 = contract === "3";
+    const currentContract = contractV3 || contractV4;
     const contractV2 = contract === "2";
     const token = tokenFrom(request);
     if (!token)
@@ -231,17 +235,17 @@ export function createTripChatHandler({
       );
     }
 
-    const maximumBodyBytes = contractV3 ? 32 * 1024 : 16 * 1024;
+    const maximumBodyBytes = currentContract ? 32 * 1024 : 16 * 1024;
     const raw = await readBody(request, maximumBodyBytes);
     if ("oversized" in raw)
       return error(
         "body-too-large",
-        `Request body exceeds ${contractV3 ? 32 : 16} KiB`,
+        `Request body exceeds ${currentContract ? 32 : 16} KiB`,
         413,
       );
     if (!("value" in raw))
       return error("invalid-json", "Invalid JSON body", 400);
-    const requestSchema = contractV3
+    const requestSchema = currentContract
       ? tripChatRequestSchema
       : tripChatRequestV2Schema;
     const parsed = requestSchema.safeParse(raw.value);
@@ -289,16 +293,25 @@ export function createTripChatHandler({
     try {
       const tripKey = tripKeyForToken(token);
       const trip = migrateTripDocument(stored.trip);
-      const context = buildTripChatContext(trip);
+      const context = buildTripChatContext(trip, clock());
       const explicitAddition = hasExplicitAdditionIntent(parsed.data.message);
       const cardMode =
-        contractV3 &&
+        currentContract &&
         "createCards" in parsed.data &&
         parsed.data.createCards === true;
       const linkMode =
         !cardMode && hasExplicitLinkEnrichmentIntent(parsed.data.message);
+      const scheduleMode =
+        !cardMode &&
+        !linkMode &&
+        contractV4 &&
+        hasExplicitScheduleIntent(parsed.data.message);
       const additionMode =
-        !cardMode && !linkMode && contractV3 && explicitAddition;
+        !cardMode &&
+        !linkMode &&
+        !scheduleMode &&
+        currentContract &&
+        explicitAddition;
       const batchMode = cardMode || additionMode;
       const savedPlaceLookup =
         hasExplicitSavedPlaceLookupIntent(parsed.data.message) ||
@@ -307,9 +320,11 @@ export function createTripChatHandler({
         ? "card"
         : linkMode
           ? "link"
-          : additionMode
-            ? "addition"
-            : "standard";
+          : scheduleMode
+            ? "schedule"
+            : additionMode
+              ? "addition"
+              : "standard";
       const generated = await withTimeout(
         (signal) =>
           model.generate({
@@ -330,9 +345,11 @@ export function createTripChatHandler({
       const boundedIds = new Set(context.places.map((place) => place.id));
       const authoritativeIds = new Set(trip.places.map((place) => place.id));
       const savedPlaceIds = (
-        batchMode || linkMode || savedPlaceLookup
-          ? output.data.savedPlaceIds
-          : []
+        scheduleMode
+          ? []
+          : batchMode || linkMode || savedPlaceLookup
+            ? output.data.savedPlaceIds
+            : []
       )
         .filter(
           (id, index, ids) =>
@@ -364,6 +381,16 @@ export function createTripChatHandler({
           if (suggestions.length >= (batchMode ? 12 : 3)) break;
         }
       }
+      const scheduledItem =
+        scheduleMode && output.data.scheduledItem
+          ? output.data.scheduledItem.savedPlaceId &&
+            boundedIds.has(output.data.scheduledItem.savedPlaceId) &&
+            authoritativeIds.has(output.data.scheduledItem.savedPlaceId) &&
+            output.data.scheduledItem.date >= trip.startDate &&
+            output.data.scheduledItem.date <= trip.endDate
+            ? output.data.scheduledItem
+            : null
+          : null;
       const resultBudgetAfterSuggestions = Math.max(
         0,
         12 - savedPlaceIds.length - suggestions.length,
@@ -434,6 +461,19 @@ export function createTripChatHandler({
       });
       if (!response.success)
         throw new TripChatInvalidOutputError("Invalid normalized model output");
+      if (contractV4) {
+        const v4 = tripChatResponseV4Schema.safeParse({
+          ...response.data,
+          suggestions: scheduleMode ? [] : response.data.suggestions,
+          unresolvedPlaceNames: scheduleMode
+            ? []
+            : response.data.unresolvedPlaceNames,
+          scheduledItem,
+        });
+        if (!v4.success)
+          throw new TripChatInvalidOutputError("Invalid schedule response");
+        return result(v4.data);
+      }
       if (contractV3) return result(response.data);
       const compatible = tripChatResponseV2Schema.safeParse({
         message: response.data.message,

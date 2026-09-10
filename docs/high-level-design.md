@@ -15,7 +15,10 @@ emerge naturally in conversation.
 The Trip Companion will be a mobile-first shared trip website with an embedded
 Ask experience. Travelers can ask for contextual advice and receive reviewable
 trip-idea cards without leaving the trip; saved ideas are surfaced when the
-traveler explicitly asks about them. A one-message Create cards control turns
+traveler explicitly asks about them. Ask can resolve one explicit request to
+schedule an existing saved idea with a date, time, and duration into a
+reviewable confirmation card; only traveler confirmation creates the itinerary
+item. A one-message Create cards control turns
 up to twelve explicitly named places, events, or activities from free-form
 prose, lists, or tables into saved matches, new cards, and unresolved names
 without relying on trigger wording. Only an explicit individual or bulk Add to
@@ -38,7 +41,7 @@ GPT may continue to use authenticated Actions as an optional secondary client.
   saved matches, new cards, and names requiring clarification.
 - Provide a one-message Create cards control that deterministically requests
   cards for named trip ideas without depending on conversational trigger words.
-- Require explicit confirmation before an AI suggestion changes shared state.
+- Require explicit confirmation before an AI suggestion or schedule changes shared state.
 - Let travelers confirm generated places individually or add all valid new
   suggestions in one atomic trip update.
 - On an explicit traveler request, add a search-grounded reference link to a
@@ -79,6 +82,8 @@ GPT may continue to use authenticated Actions as an optional secondary client.
   response to an explicit traveler request.
 - Allowing the GPT to edit application code, deploy the website, make bookings,
   purchase anything, or delete a trip.
+- Letting embedded Ask directly create itinerary items, evaluate availability,
+  or declare a timed plan conflict-free.
 - Letting automated optimization silently overwrite confirmed itinerary choices.
 - Building a persistent job queue or autonomous agent loop; initial optimization
   runs as part of relevant API mutations and stores a proposal for review.

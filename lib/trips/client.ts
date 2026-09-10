@@ -8,6 +8,8 @@ type RequestResult = {
   status: number;
   trip: TripDocument;
   duplicate?: boolean;
+  noChanges?: boolean;
+  message?: string;
 };
 interface MutationOptions {
   trip: TripDocument;
@@ -37,6 +39,8 @@ export async function mutateTripWithRetry({
         status: "success" as const,
         trip: response.trip,
         duplicate: response.duplicate ?? false,
+        noChanges: response.noChanges ?? false,
+        message: response.message,
       };
     current = response.trip;
   }

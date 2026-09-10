@@ -31,10 +31,14 @@ export const tripCopy = {
     plan: {
       eyebrow: "YOUR PLAN",
       heading: "Your plan, day by day.",
+      suggest: "Suggest a balanced plan",
+      suggesting: "Creating suggestion…",
+      regenerate: "Regenerate balanced plan",
       proposalEyebrow: "SUGGESTED CHANGES",
       apply: "Apply changes",
       dismiss: "Not now",
-      stale: "This suggestion is out of date. Ask ChatGPT to make a new one.",
+      stale:
+        "This suggestion is out of date. Regenerate it to review a fresh draft.",
       emptyDay: "Nothing here yet. Pick an idea to add.",
     },
     chat: {

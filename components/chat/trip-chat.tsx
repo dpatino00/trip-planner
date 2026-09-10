@@ -4,13 +4,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChatMessage } from "@/components/chat/chat-message";
 import type { SuggestionStatus } from "@/components/chat/suggestion-card";
+import type { ScheduleStatus } from "@/components/chat/schedule-card";
 import {
   clearChatSession,
   loadChatSession,
   saveChatSession,
   type ChatSessionMessage,
 } from "@/lib/chat/session";
-import { tripChatResponseSchema } from "@/lib/chat/schema";
+import {
+  tripChatResponseV4Schema,
+  type ScheduledItem,
+} from "@/lib/chat/schema";
 import { tripCopy } from "@/lib/ui/copy";
 import type { SuggestedPlace, TripDocument } from "@/lib/types";
 
@@ -20,6 +24,10 @@ export interface AddSuggestionResult {
 
 export interface AddSuggestionsResult {
   statuses: AddSuggestionResult["status"][];
+}
+
+export interface ConfirmScheduleResult {
+  status: "saved" | "duplicate" | "conflict" | "error";
 }
 
 interface TripChatProps {
@@ -32,6 +40,9 @@ interface TripChatProps {
   ) => Promise<AddSuggestionsResult>;
   onViewSavedPlace: (placeId: string) => void;
   onTripVersion?: (version: number) => void | Promise<void>;
+  onConfirmSchedule?: (
+    scheduledItem: ScheduledItem,
+  ) => Promise<ConfirmScheduleResult>;
 }
 
 // @spec CHAT-DATA-008
@@ -61,6 +72,7 @@ export function TripChat({
   onAddSuggestions,
   onViewSavedPlace,
   onTripVersion,
+  onConfirmSchedule,
 }: TripChatProps) {
   const [messages, setMessages] = useState<ChatSessionMessage[]>([]);
   const [composer, setComposer] = useState("");
@@ -70,6 +82,9 @@ export function TripChat({
   const [statuses, setStatuses] = useState<Record<string, SuggestionStatus>>(
     {},
   );
+  const [scheduleStatuses, setScheduleStatuses] = useState<
+    Record<string, ScheduleStatus>
+  >({});
   const [hydrated, setHydrated] = useState(false);
   const skipNextSave = useRef(false);
   const placeById = useMemo(
@@ -109,6 +124,7 @@ export function TripChat({
       savedPlaceIds: [],
       suggestions: [],
       unresolvedPlaceNames: [],
+      scheduledItem: null,
     };
     const history = buildChatHistory(messages);
     const requestCards = createCards;
@@ -123,7 +139,7 @@ export function TripChat({
         headers: {
           authorization: `Bearer ${token}`,
           "content-type": "application/json",
-          "x-trip-chat-contract": "3",
+          "x-trip-chat-contract": "4",
         },
         body: JSON.stringify({
           message,
@@ -137,7 +153,7 @@ export function TripChat({
           ?.message;
         throw new Error(message ?? "Ask is unavailable");
       }
-      const parsed = tripChatResponseSchema.parse(payload);
+      const parsed = tripChatResponseV4Schema.parse(payload);
       setMessages((current) =>
         [
           ...current,
@@ -148,6 +164,7 @@ export function TripChat({
             savedPlaceIds: parsed.savedPlaceIds,
             suggestions: parsed.suggestions,
             unresolvedPlaceNames: parsed.unresolvedPlaceNames,
+            scheduledItem: parsed.scheduledItem,
           },
         ].slice(-12),
       );
@@ -209,6 +226,24 @@ export function TripChat({
     setStatuses((current) => ({ ...current, [key]: outcome.status }));
   }
 
+  async function confirmSchedule(
+    messageId: string,
+    scheduledItem: ScheduledItem,
+  ) {
+    setScheduleStatuses((current) => ({ ...current, [messageId]: "adding" }));
+    try {
+      const outcome = onConfirmSchedule
+        ? await onConfirmSchedule(scheduledItem)
+        : { status: "error" as const };
+      setScheduleStatuses((current) => ({
+        ...current,
+        [messageId]: outcome.status,
+      }));
+    } catch {
+      setScheduleStatuses((current) => ({ ...current, [messageId]: "error" }));
+    }
+  }
+
   function dismissSuggestion(messageId: string, index: number) {
     setMessages((current) =>
       current.map((message) =>
@@ -240,6 +275,7 @@ export function TripChat({
     setCreateCards(false);
     setError("");
     setStatuses({});
+    setScheduleStatuses({});
   }
 
   return (
@@ -284,6 +320,15 @@ export function TripChat({
               void addSuggestions(message.id, suggestions, indexes)
             }
             onViewSavedPlace={onViewSavedPlace}
+            scheduledPlace={
+              message.scheduledItem
+                ? (placeById.get(message.scheduledItem.savedPlaceId) ?? null)
+                : null
+            }
+            scheduleStatus={scheduleStatuses[message.id] ?? "idle"}
+            onConfirmSchedule={(scheduledItem) =>
+              void confirmSchedule(message.id, scheduledItem)
+            }
           />
         ))}
         {loading ? (

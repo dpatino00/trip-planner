@@ -2,6 +2,7 @@ import type { TripDocument, TripMutationRequest } from "@/lib/types";
 import { createSuggestedPlace } from "@/lib/places/suggested";
 import { applyTripMutation, createTripDocument } from "@/lib/trips/model";
 import { migrateTripDocument } from "@/lib/trips/migrate";
+import { buildPlanProposal } from "@/lib/trips/optimizer";
 import type { RateLimiter } from "@/lib/trips/rate-limit";
 import type { TripRepository } from "@/lib/trips/repository-memory";
 import {
@@ -209,7 +210,23 @@ export function createTripHandlers({
           );
         let changed: TripDocument;
         try {
-          if (
+          if (requestBody.mutation.type === "generate-plan-proposal") {
+            const proposal = buildPlanProposal(current, {
+              conditions: null,
+              now: clock(),
+            });
+            if (!proposal) {
+              return result({
+                trip: current,
+                noChanges: true,
+                message: "Every eligible saved place is already in your plan.",
+              });
+            }
+            changed = applyTripMutation(current, {
+              type: "store-plan-proposal",
+              proposal: { ...proposal, baseVersion: current.version + 1 },
+            });
+          } else if (
             requestBody.mutation.type === "add-suggested-place" ||
             requestBody.mutation.type === "add-suggested-places"
           ) {

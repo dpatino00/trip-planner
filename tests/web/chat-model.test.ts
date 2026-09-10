@@ -96,6 +96,41 @@ it("uses strict Responses parsing with one bounded web search", async () => {
   });
 });
 
+// @spec CHAT-BE-036
+it("disables web search for a schedule confirmation", async () => {
+  const parse = vi.fn().mockResolvedValue({
+    status: "completed",
+    output_parsed: {
+      message: "Ready to confirm.",
+      savedPlaceIds: [],
+      savedPlaceSources: [],
+      suggestions: [],
+      unresolvedPlaceNames: [],
+      scheduledItem: null,
+    },
+    output: [],
+  });
+  const model = createOpenAITripChatModel({
+    client: { responses: { parse } },
+    model: "gpt-test",
+  });
+
+  await model.generate({
+    message: "Add Oscar's to my plan tomorrow at 9 for 2 hours",
+    history: [],
+    context: {} as never,
+    mode: "schedule",
+  });
+
+  expect(parse).toHaveBeenCalledWith(
+    expect.objectContaining({ max_output_tokens: 1600 }),
+    expect.anything(),
+  );
+  const request = parse.mock.calls[0][0] as Record<string, unknown>;
+  expect(request).not.toHaveProperty("tools");
+  expect(request).not.toHaveProperty("max_tool_calls");
+});
+
 // @spec CHAT-DATA-001, CHAT-DATA-005, CHAT-BE-001, CHAT-BE-029, CHAT-BE-030
 it("instructs explicit-card mode to create only named place, event, or activity cards", async () => {
   const parse = vi.fn().mockResolvedValue({

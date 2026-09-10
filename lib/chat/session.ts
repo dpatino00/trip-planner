@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { suggestedPlaceSchema } from "@/lib/chat/schema";
+import { scheduleItemSchema } from "@/lib/chat/schema";
 import type { SuggestedPlace } from "@/lib/types";
 
 export interface ChatSessionMessage {
@@ -10,6 +11,7 @@ export interface ChatSessionMessage {
   savedPlaceIds: string[];
   suggestions: SuggestedPlace[];
   unresolvedPlaceNames: string[];
+  scheduledItem?: z.infer<typeof scheduleItemSchema> | null;
 }
 
 const uniqueNormalizedStrings = (values: string[]) =>
@@ -33,6 +35,7 @@ const sessionMessageSchema = z
       .array(z.string().trim().min(1).max(120))
       .max(12)
       .refine(uniqueNormalizedStrings),
+    scheduledItem: scheduleItemSchema.nullable().default(null),
   })
   .strict()
   .superRefine((value, context) => {
@@ -46,7 +49,8 @@ const sessionMessageSchema = z
     if (
       value.savedPlaceIds.length +
         value.suggestions.length +
-        value.unresolvedPlaceNames.length >
+        value.unresolvedPlaceNames.length +
+        (value.scheduledItem ? 1 : 0) >
       12
     ) {
       context.addIssue({
@@ -58,7 +62,7 @@ const sessionMessageSchema = z
 
 const sessionSchema = z
   .object({
-    version: z.literal(3),
+    version: z.literal(4),
     messages: z.array(sessionMessageSchema).max(12),
   })
   .strict();
@@ -72,12 +76,13 @@ async function tokenHash(token: string) {
 }
 
 export async function chatSessionStorageKey(token: string) {
-  return `trip-chat:v3:${await tokenHash(token)}`;
+  return `trip-chat:v4:${await tokenHash(token)}`;
 }
 
 export async function clearChatSession(token: string) {
   try {
     const hash = await tokenHash(token);
+    sessionStorage.removeItem(`trip-chat:v4:${hash}`);
     sessionStorage.removeItem(`trip-chat:v3:${hash}`);
     sessionStorage.removeItem(`trip-chat:v1:${hash}`);
     sessionStorage.removeItem(`trip-chat:v2:${hash}`);
@@ -97,7 +102,7 @@ export async function saveChatSession(
       ...message,
       content: message.content.replaceAll(token, "[private trip link removed]"),
     }));
-    sessionStorage.setItem(key, JSON.stringify({ version: 3, messages: safe }));
+    sessionStorage.setItem(key, JSON.stringify({ version: 4, messages: safe }));
   } catch {
     // Session persistence is best effort.
   }
@@ -111,6 +116,7 @@ export async function loadChatSession(
     const hash = await tokenHash(token);
     sessionStorage.removeItem(`trip-chat:v1:${hash}`);
     sessionStorage.removeItem(`trip-chat:v2:${hash}`);
+    sessionStorage.removeItem(`trip-chat:v3:${hash}`);
     const raw = sessionStorage.getItem(key);
     if (!raw) return [];
     const parsed = sessionSchema.safeParse(JSON.parse(raw));

@@ -244,6 +244,7 @@ export type TripMutation =
 
 export type TripApiMutation =
   | TripMutation
+  | { type: "generate-plan-proposal" }
   | { type: "add-suggested-place"; suggestion: SuggestedPlace }
   | { type: "add-suggested-places"; suggestions: SuggestedPlace[] };
 

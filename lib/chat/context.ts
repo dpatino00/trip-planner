@@ -4,6 +4,7 @@ export interface TripChatContext {
   title: string;
   destination: TripDocument["destination"];
   dates: { start: string; end: string };
+  today?: string;
   preferences: TripDocument["preferences"];
   places: Array<{
     id: string;
@@ -24,12 +25,34 @@ export interface TripChatContext {
   pendingProposal: { summary: string; changes: string[] } | null;
 }
 
+function localDate(now: Date, timeZone: string | null) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timeZone ?? "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+    const value = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, part.value]),
+    );
+    return `${value.year}-${value.month}-${value.day}`;
+  } catch {
+    return now.toISOString().slice(0, 10);
+  }
+}
+
 function compactText(value: string, maximum: number) {
   return value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`;
 }
 
 // @spec CHAT-DATA-003, CHAT-BE-011
-export function buildTripChatContext(trip: TripDocument): TripChatContext {
+export function buildTripChatContext(
+  trip: TripDocument,
+  now = new Date(),
+): TripChatContext {
   const names = new Map(trip.places.map((place) => [place.id, place.name]));
   const pending = trip.proposals.find(
     (proposal) => proposal.status === "pending",
@@ -38,6 +61,7 @@ export function buildTripChatContext(trip: TripDocument): TripChatContext {
     title: trip.title,
     destination: trip.destination,
     dates: { start: trip.startDate, end: trip.endDate },
+    today: localDate(now, trip.destination.timeZone),
     preferences: {
       ...trip.preferences,
       notes: compactText(trip.preferences.notes, 500),

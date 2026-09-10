@@ -18,7 +18,7 @@ export interface TripChatModel {
     message: string;
     history: TripChatRequest["history"];
     context: TripChatContext;
-    mode?: "standard" | "addition" | "card" | "link";
+    mode?: "standard" | "addition" | "card" | "link" | "schedule";
     signal?: AbortSignal;
   }): Promise<TripChatModelResult>;
 }

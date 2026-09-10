@@ -148,6 +148,9 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-DATA-007**: Each unresolved place name in an embedded Ask response shall contain 1–120 characters and shall be unique under normalized name comparison.
 - [x] **CHAT-DATA-008**: The embedded Ask model history shall contain no more than eight role-and-text-only messages of no more than 2,000 characters each and 8,000 characters combined, excluding stored saved-place IDs, suggestions, and unresolved place names.
 - [x] **CHAT-DATA-009**: When a traveler confirms starting a new Ask chat, the browser shall remove only the current trip's version-3 session entry and same-token legacy entries, without changing shared trip data or another trip's session entry.
+- [x] **CHAT-DATA-010**: When a version-4 Ask request is processed, the compact authoritative model context shall include the server-resolved current calendar date in the destination time zone for relative-date interpretation.
+- [x] **CHAT-DATA-011**: Each version-4 Ask response shall include a nullable scheduled item containing one authoritative saved-place ID, an inclusive trip date, a local HH:MM start time, and a 15–1,440-minute duration.
+- [x] **CHAT-DATA-012**: The embedded Ask browser shall store version-4 chat messages and discard version-1 through version-3 tab-local session entries for the same trip.
 - [x] **CHAT-API-001**: When the version-3 embedded Ask API receives a valid bearer token, a 1–8,000 character message, no more than eight bounded history messages, and an optional boolean `createCards` value, the system shall load the authoritative trip and return a no-store validated Ask response.
 - [x] **CHAT-API-002**: If the embedded Ask API receives missing or malformed bearer authentication, then the system shall return status 401 before reading trip storage.
 - [x] **CHAT-API-003**: If the embedded Ask API receives an unknown or expired trip token, then the system shall return status 404.
@@ -161,6 +164,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-API-011**: When explicit link enrichment completes successfully, embedded Ask shall return the authoritative trip version after any saved-idea source update in the no-store response.
 - [x] **CHAT-API-012**: When an embedded Ask request advertises contract version 3, the system shall return the message, saved-place IDs, suggestions, unresolved place names, and authoritative trip version; when it advertises version 2, the system shall return the version-2 four-field shape and enforce its three-result limits; and when it advertises no version, the system shall return the strict legacy shape without additive fields.
 - [x] **CHAT-API-013**: When an embedded Ask request advertises contract version 2 or no version, the system shall reject `createCards` as an unknown field and preserve the older request contract.
+- [x] **CHAT-API-014**: When an embedded Ask request advertises contract version 4, the system shall return every version-3 response field plus a nullable scheduled item while version-3, version-2, and headerless responses preserve their current shapes.
 - [x] **CHAT-BE-001**: When generating a standard or link-enrichment embedded Ask response, the system shall configure at most one low-context web-search call and a 1,600-token output cap, and when generating an explicit-addition or explicit-card response, it shall configure no more than four low-context web-search calls and a 5,000-token output cap, while every mode shall disable provider storage and configure no other tools.
 - [x] **CHAT-BE-002**: When embedded Ask handles a request, the system shall perform no trip repository create or delete operation and no update except validated source enrichment for a named saved idea during explicit link-enrichment mode.
 - [x] **CHAT-BE-003**: When embedded Ask receives an itinerary-planning question, the system shall return narrative guidance for the existing Plan proposal workflow without creating a plan proposal.
@@ -193,6 +197,10 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-BE-030**: When explicit-card mode receives named places, events, or activities, embedded Ask shall return a non-mutating mixture of authoritative saved-idea IDs, new trip-idea suggestions, and unresolved names for the first twelve named occurrences while returning no invented card for an open-ended unnamed request.
 - [x] **CHAT-BE-031**: When the current user message explicitly requests a link, URL, website, or source for a named saved idea, embedded Ask shall select link-enrichment mode, return only authoritative saved-idea matches and grounded source candidates, and perform no new-idea suggestion.
 - [x] **CHAT-BE-032**: When a traveler mentions a saved idea without explicitly requesting its link, URL, website, or source, embedded Ask shall not enrich that idea's source URL.
+- [x] **CHAT-BE-033**: When a version-4 message explicitly asks to schedule one saved idea, embedded Ask shall select schedule mode before explicit-addition mode.
+- [x] **CHAT-BE-034**: When schedule mode has one valid bounded authoritative saved-place match and valid schedule values, embedded Ask shall return one scheduled item, no suggestions or unresolved names, and perform no trip write.
+- [x] **CHAT-BE-035**: If a schedule request lacks a required detail, resolves outside the inclusive trip range, or has zero or multiple saved-place matches, embedded Ask shall return no scheduled item and request clarification.
+- [x] **CHAT-BE-036**: In schedule mode, embedded Ask shall disable web search and shall not claim availability, reservations, or conflict-free timing.
 
 ## Embedded Ask Interface
 
@@ -213,6 +221,8 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-UI-015**: When Ask history exists, the interface shall provide a New chat control that is disabled during hydration or generation; after confirmation it shall clear rendered messages, composer text, errors, and suggestion statuses and return to the empty-state prompt, while canceling preserves the conversation.
 - [x] **CHAT-UI-016**: The Ask composer shall provide a labeled Create cards checkbox that defaults off, is disabled with generation controls, submits `createCards: true` only for the next accepted message, resets immediately after that submission, and is excluded from saved chat history.
 - [x] **CHAT-UI-017**: Each new Ask suggestion card shall identify itself as an unverified trip idea without describing the card as place-only.
+- [x] **CHAT-UI-018**: When an assistant response contains a valid scheduled item, Ask shall display the saved idea, resolved date, local start time, duration, and an explicit confirmation control.
+- [x] **CHAT-UI-019**: When a traveler confirms a scheduled item while online, the browser shall issue the existing versioned add-itinerary-item mutation with that candidate’s values, empty notes, and confirmed status and shall retain retryable conflict or error state without duplicating the item.
 
 ## Optimization Proposals
 

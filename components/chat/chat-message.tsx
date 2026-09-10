@@ -6,6 +6,11 @@ import {
   SuggestionCard,
   type SuggestionStatus,
 } from "@/components/chat/suggestion-card";
+import {
+  ScheduleCard,
+  type ScheduleStatus,
+} from "@/components/chat/schedule-card";
+import type { ScheduledItem } from "@/lib/chat/schema";
 
 interface ChatMessageProps {
   message: ChatSessionMessage;
@@ -16,6 +21,9 @@ interface ChatMessageProps {
   onAddAll: (suggestions: SuggestedPlace[], indexes: number[]) => void;
   onDismiss: (index: number) => void;
   onViewSavedPlace: (placeId: string) => void;
+  scheduledPlace: SavedPlace | null;
+  scheduleStatus: ScheduleStatus;
+  onConfirmSchedule: (scheduledItem: ScheduledItem) => void;
 }
 
 // @spec CHAT-UI-002, CHAT-UI-006, CHAT-UI-012, CHAT-UI-013, CHAT-UI-014
@@ -28,6 +36,9 @@ export function ChatMessage({
   onAddAll,
   onDismiss,
   onViewSavedPlace,
+  scheduledPlace,
+  scheduleStatus,
+  onConfirmSchedule,
 }: ChatMessageProps) {
   const addableSuggestions = message.suggestions.flatMap(
     (suggestion, index) => {
@@ -91,6 +102,15 @@ export function ChatMessage({
             />
           ))}
         </div>
+      ) : null}
+      {message.scheduledItem && scheduledPlace ? (
+        <ScheduleCard
+          place={scheduledPlace}
+          scheduledItem={message.scheduledItem}
+          status={scheduleStatus}
+          online={online}
+          onConfirm={() => onConfirmSchedule(message.scheduledItem!)}
+        />
       ) : null}
       {message.unresolvedPlaceNames.length > 0 ? (
         <div

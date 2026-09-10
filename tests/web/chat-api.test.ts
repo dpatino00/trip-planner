@@ -34,7 +34,7 @@ function chatRequest(
     token?: string;
     ip?: string;
     raw?: string;
-    contractVersion?: 2 | 3 | null;
+    contractVersion?: 2 | 3 | 4 | null;
   } = {},
 ) {
   const headers = new Headers({
@@ -53,6 +53,84 @@ function chatRequest(
     body: options.raw ?? JSON.stringify(body),
   });
 }
+
+// @spec CHAT-DATA-010, CHAT-DATA-011, CHAT-API-014, CHAT-BE-033, CHAT-BE-034, CHAT-BE-036
+it("returns a validated schedule candidate without mutating the trip", async () => {
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Here is the plan confirmation.",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduledItem: {
+          savedPlaceId: "place-tacos",
+          date: "2026-09-14",
+          startTime: "09:00",
+          durationMinutes: 120,
+        },
+      },
+    }),
+  };
+  const { POST, repository } = await setup({ model });
+  const update = vi.spyOn(repository, "update");
+
+  const response = await POST(
+    chatRequest(
+      {
+        message: "Add Tacos to my plan tomorrow at 9 for 2 hours",
+        history: [],
+      },
+      { token: SHARE_TOKEN, contractVersion: 4 },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    scheduledItem: {
+      savedPlaceId: "place-tacos",
+      date: "2026-09-14",
+      startTime: "09:00",
+      durationMinutes: 120,
+    },
+    suggestions: [],
+    unresolvedPlaceNames: [],
+  });
+  expect(vi.mocked(model.generate)).toHaveBeenCalledWith(
+    expect.objectContaining({ mode: "schedule" }),
+  );
+  expect(update).not.toHaveBeenCalled();
+});
+
+// @spec CHAT-BE-035
+it("drops a schedule candidate outside the trip range", async () => {
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Which trip date did you mean?",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduledItem: {
+          savedPlaceId: "place-tacos",
+          date: "2026-10-01",
+          startTime: "09:00",
+          durationMinutes: 120,
+        },
+      },
+    }),
+  };
+  const { POST } = await setup({ model });
+  const response = await POST(
+    chatRequest(
+      { message: "Add Tacos to my plan", history: [] },
+      { token: SHARE_TOKEN, contractVersion: 4 },
+    ),
+  );
+  expect((await response.json()).scheduledItem).toBeNull();
+});
 
 async function setup(
   options: {
