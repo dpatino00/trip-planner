@@ -77,6 +77,43 @@ export const suggestedPlaceSchema = z
   })
   .strict();
 
+const scheduleCandidateFields = {
+  savedPlaceId: placeIdSchema.nullable(),
+  suggestion: suggestedPlaceSchema.nullable(),
+  date: z.iso.date(),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  durationMinutes: z.number().int().min(15).max(1440),
+};
+
+function hasExactlyOnePlaceSource(value: {
+  savedPlaceId: string | null;
+  suggestion: unknown | null;
+}) {
+  return (
+    Number(value.savedPlaceId !== null) + Number(value.suggestion !== null) ===
+    1
+  );
+}
+
+// @spec CHAT-DATA-013
+export const scheduleCandidateSchema = z
+  .object(scheduleCandidateFields)
+  .strict()
+  .refine(hasExactlyOnePlaceSource, {
+    message: "Schedule candidate must have exactly one place source",
+  });
+
+const rawScheduleCandidateSchema = z
+  .object({
+    ...scheduleCandidateFields,
+    suggestion: suggestedPlaceSchema.nullable().default(null),
+    durationMinutes: z.number().int().min(15).max(1440).nullable(),
+  })
+  .strict()
+  .refine(hasExactlyOnePlaceSource, {
+    message: "Schedule candidate must have exactly one place source",
+  });
+
 const sourcedSuggestedPlaceSchema = suggestedPlaceSchema.extend({
   sourceUrl: z.string().url().startsWith("https://"),
 });
@@ -135,6 +172,11 @@ export const tripChatResponseV4Schema = tripChatResponseSchema.extend({
   scheduledItem: scheduleItemSchema.nullable().default(null),
 });
 
+// @spec CHAT-DATA-013, CHAT-API-015
+export const tripChatResponseV5Schema = tripChatResponseSchema.extend({
+  scheduleCandidate: scheduleCandidateSchema.nullable().default(null),
+});
+
 export const tripChatResponseV2Schema = z
   .object({
     message: z.string().trim().min(1).max(2000),
@@ -160,7 +202,7 @@ export const tripChatCandidateResponseSchema = z
       .array(z.string().trim().min(1).max(120))
       .max(12)
       .default([]),
-    scheduledItem: scheduleItemSchema.nullable().default(null),
+    scheduledItem: rawScheduleCandidateSchema.nullable().default(null),
   })
   .strict();
 
@@ -188,6 +230,15 @@ const savedPlaceSourceModelSchema = z
     sourceUrl: z.string(),
   })
   .strict();
+const scheduleCandidateModelSchema = z
+  .object({
+    savedPlaceId: z.string().nullable(),
+    suggestion: suggestedPlaceModelSchema.nullable(),
+    date: z.string(),
+    startTime: z.string(),
+    durationMinutes: z.number().nullable(),
+  })
+  .strict();
 
 // @spec CHAT-DATA-006
 export const tripChatModelResponseSchema = z
@@ -197,7 +248,7 @@ export const tripChatModelResponseSchema = z
     savedPlaceSources: z.array(savedPlaceSourceModelSchema).max(12),
     suggestions: z.array(suggestedPlaceModelSchema).max(12),
     unresolvedPlaceNames: z.array(z.string()).max(12),
-    scheduledItem: scheduleItemSchema.nullable(),
+    scheduledItem: scheduleCandidateModelSchema.nullable(),
   })
   .strict();
 
@@ -253,3 +304,4 @@ export const tripChatRequestV2Schema = z
 export type TripChatRequest = z.infer<typeof tripChatRequestSchema>;
 export type TripChatResponse = z.infer<typeof tripChatResponseSchema>;
 export type ScheduledItem = z.infer<typeof scheduleItemSchema>;
+export type ScheduleCandidate = z.infer<typeof scheduleCandidateSchema>;

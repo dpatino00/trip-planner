@@ -84,7 +84,7 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/trip/chat",
     expect.objectContaining({
-      headers: expect.objectContaining({ "x-trip-chat-contract": "4" }),
+      headers: expect.objectContaining({ "x-trip-chat-contract": "5" }),
     }),
   );
   expect(screen.getByText("La Jolla Cove")).toBeVisible();
@@ -117,7 +117,7 @@ it("submits with Enter, renders suggestions, dismisses locally, and confirms exp
   expect(screen.queryByText("La Jolla Cove")).not.toBeInTheDocument();
 });
 
-// @spec CHAT-UI-018, CHAT-UI-019
+// @spec CHAT-UI-018, CHAT-UI-019, CHAT-UI-020, CHAT-UI-021, CHAT-UI-022
 it("renders a schedule confirmation and adds its exact itinerary values only after confirmation", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     Response.json({
@@ -125,8 +125,9 @@ it("renders a schedule confirmation and adds its exact itinerary values only aft
       savedPlaceIds: [],
       suggestions: [],
       unresolvedPlaceNames: [],
-      scheduledItem: {
+      scheduleCandidate: {
         savedPlaceId: "place-tacos",
+        suggestion: null,
         date: "2026-09-14",
         startTime: "09:00",
         durationMinutes: 120,
@@ -164,12 +165,87 @@ it("renders a schedule confirmation and adds its exact itinerary values only aft
   await waitFor(() =>
     expect(onConfirmSchedule).toHaveBeenCalledWith({
       savedPlaceId: "place-tacos",
+      suggestion: null,
       date: "2026-09-14",
       startTime: "09:00",
       durationMinutes: 120,
     }),
   );
   expect(await within(card).findByText("Added to plan")).toBeVisible();
+});
+
+// @spec CHAT-DATA-013, CHAT-UI-020, CHAT-UI-021, CHAT-UI-022
+it("renders one confirmation that can save and schedule a new named place", async () => {
+  const zooSuggestion = {
+    ...suggestion,
+    name: "San Diego Zoo",
+    summary: "A major wildlife park in Balboa Park with broad animal exhibits.",
+    locality: "Balboa Park",
+    interests: ["wildlife" as const],
+    tags: ["wildlife", "zoo"],
+    profile: "outdoor" as const,
+    durationMinutes: 120,
+    costLevel: 3 as const,
+    reservationRecommended: true,
+    sourceUrl: "https://sandiegozoowildlifealliance.org/",
+  };
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({
+      message: "Ready to confirm.",
+      savedPlaceIds: [],
+      suggestions: [],
+      unresolvedPlaceNames: [],
+      scheduleCandidate: {
+        savedPlaceId: null,
+        suggestion: zooSuggestion,
+        date: "2026-09-15",
+        startTime: "09:00",
+        durationMinutes: 120,
+      },
+      tripVersion: 1,
+    }),
+  );
+  const onConfirmSchedule = vi.fn().mockResolvedValue({ status: "saved" });
+  render(
+    <TripChat
+      token={SHARE_TOKEN}
+      trip={makeTripV2()}
+      online
+      onAddSuggestion={vi.fn()}
+      onConfirmSchedule={onConfirmSchedule}
+      onViewSavedPlace={vi.fn()}
+    />,
+  );
+
+  const composer = screen.getByLabelText("Ask about this trip");
+  await waitFor(() => expect(composer).toBeEnabled());
+  fireEvent.change(composer, {
+    target: { value: "Add San Diego Zoo to the trip Tuesday at 9 AM" },
+  });
+  fireEvent.keyDown(composer, { key: "Enter" });
+
+  const card = await screen.findByRole("article", {
+    name: "Schedule San Diego Zoo",
+  });
+  expect(card).toHaveTextContent("New trip idea · details not verified");
+  expect(card).toHaveTextContent("2026-09-15 · 09:00 · 120 minutes");
+  expect(onConfirmSchedule).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(card).getByRole("button", { name: "Confirm & add to plan" }),
+  );
+  await waitFor(() =>
+    expect(onConfirmSchedule).toHaveBeenCalledWith({
+      savedPlaceId: null,
+      suggestion: zooSuggestion,
+      date: "2026-09-15",
+      startTime: "09:00",
+      durationMinutes: 120,
+    }),
+  );
+  expect(await within(card).findByText("Added to plan")).toBeVisible();
+  expect(
+    screen.getByRole("heading", { name: "Ask about San Diego" }),
+  ).toBeVisible();
 });
 
 // @spec CHAT-DATA-001, CHAT-UI-007, CHAT-UI-016, CHAT-UI-017
@@ -473,7 +549,7 @@ it("renders a batch, explains unresolved names, and adds all new cards together"
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/trip/chat",
     expect.objectContaining({
-      headers: expect.objectContaining({ "x-trip-chat-contract": "4" }),
+      headers: expect.objectContaining({ "x-trip-chat-contract": "5" }),
     }),
   );
 });

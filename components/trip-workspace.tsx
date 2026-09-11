@@ -7,7 +7,7 @@ import useSWR from "swr";
 
 import { TripChat } from "@/components/chat/trip-chat";
 import { TripReadiness } from "@/components/trip-readiness";
-import type { ScheduledItem } from "@/lib/chat/schema";
+import type { ScheduleCandidate } from "@/lib/chat/schema";
 import {
   loadTripSnapshot,
   removeTripSnapshot,
@@ -84,6 +84,27 @@ function matchesSuggestedPlace(place: SavedPlace, suggestion: SuggestedPlace) {
 }
 
 function mutationIsPresent(trip: TripDocument, mutation: TripApiMutation) {
+  if (mutation.type === "confirm-chat-schedule") {
+    const placeId =
+      mutation.candidate.savedPlaceId ??
+      trip.places.find(
+        (place) =>
+          mutation.candidate.suggestion &&
+          matchesSuggestedPlace(place, mutation.candidate.suggestion),
+      )?.id;
+    return Boolean(
+      placeId &&
+      trip.itinerary.some(
+        (item) =>
+          item.placeId === placeId &&
+          item.date === mutation.candidate.date &&
+          item.startTime === mutation.candidate.startTime &&
+          item.durationMinutes === mutation.candidate.durationMinutes &&
+          item.notes === "" &&
+          item.status === "confirmed",
+      ),
+    );
+  }
   if (mutation.type === "update-itinerary-item") {
     const item = trip.itinerary.find(
       (candidate) => candidate.id === mutation.itemId,
@@ -798,18 +819,11 @@ export function TripWorkspace() {
     })();
   }
 
-  // @spec CHAT-UI-019
-  async function confirmChatSchedule(scheduledItem: ScheduledItem) {
+  // @spec CHAT-UI-019, CHAT-UI-021, CHAT-UI-022, CHAT-UI-023
+  async function confirmChatSchedule(candidate: ScheduleCandidate) {
     return performMutation({
-      type: "add-itinerary-item",
-      item: {
-        placeId: scheduledItem.savedPlaceId,
-        date: scheduledItem.date,
-        startTime: scheduledItem.startTime,
-        durationMinutes: scheduledItem.durationMinutes,
-        notes: "",
-        status: "confirmed",
-      },
+      type: "confirm-chat-schedule",
+      candidate,
     });
   }
 

@@ -14,6 +14,7 @@ import {
   tripChatRequestV2Schema,
   tripChatResponseSchema,
   tripChatResponseV4Schema,
+  tripChatResponseV5Schema,
   tripChatResponseV2Schema,
 } from "@/lib/chat/schema";
 import { migrateTripDocument } from "@/lib/trips/migrate";
@@ -182,7 +183,7 @@ async function withTimeout<T>(
   }
 }
 
-// @spec CHAT-DATA-002, CHAT-DATA-005, CHAT-DATA-007, CHAT-API-001, CHAT-API-002, CHAT-API-003, CHAT-API-004, CHAT-API-005, CHAT-API-006, CHAT-API-007, CHAT-API-008, CHAT-API-009, CHAT-API-010, CHAT-API-011, CHAT-API-012, CHAT-API-013, CHAT-BE-002, CHAT-BE-009, CHAT-BE-010, CHAT-BE-011, CHAT-BE-012, CHAT-BE-013, CHAT-BE-015, CHAT-BE-020, CHAT-BE-021, CHAT-BE-022, CHAT-BE-029, CHAT-BE-030, CHAT-BE-031, CHAT-BE-032
+// @spec CHAT-DATA-002, CHAT-DATA-005, CHAT-DATA-007, CHAT-DATA-013, CHAT-API-001, CHAT-API-002, CHAT-API-003, CHAT-API-004, CHAT-API-005, CHAT-API-006, CHAT-API-007, CHAT-API-008, CHAT-API-009, CHAT-API-010, CHAT-API-011, CHAT-API-012, CHAT-API-013, CHAT-API-015, CHAT-BE-002, CHAT-BE-009, CHAT-BE-010, CHAT-BE-011, CHAT-BE-012, CHAT-BE-013, CHAT-BE-015, CHAT-BE-020, CHAT-BE-021, CHAT-BE-022, CHAT-BE-029, CHAT-BE-030, CHAT-BE-031, CHAT-BE-032, CHAT-BE-037, CHAT-BE-038
 export function createTripChatHandler({
   repository,
   rateLimiter,
@@ -194,9 +195,10 @@ export function createTripChatHandler({
 }: Dependencies) {
   return async function POST(request: Request) {
     const contract = request.headers.get("x-trip-chat-contract");
+    const contractV5 = contract === "5";
     const contractV4 = contract === "4";
     const contractV3 = contract === "3";
-    const currentContract = contractV3 || contractV4;
+    const currentContract = contractV3 || contractV4 || contractV5;
     const contractV2 = contract === "2";
     const token = tokenFrom(request);
     if (!token)
@@ -304,7 +306,7 @@ export function createTripChatHandler({
       const scheduleMode =
         !cardMode &&
         !linkMode &&
-        contractV4 &&
+        (contractV4 || contractV5) &&
         hasExplicitScheduleIntent(parsed.data.message);
       const additionMode =
         !cardMode &&
@@ -321,7 +323,9 @@ export function createTripChatHandler({
         : linkMode
           ? "link"
           : scheduleMode
-            ? "schedule"
+            ? contractV5
+              ? "schedule-new"
+              : "schedule"
             : additionMode
               ? "addition"
               : "standard";
@@ -366,7 +370,10 @@ export function createTripChatHandler({
       const searchedUrls = suppliedHttpsUrls(generated.sources ?? []);
       const suggestions: (typeof output.data.suggestions)[number][] = [];
       const suggestionKeys = new Set<string>();
-      if (batchMode || (!linkMode && savedPlaceIds.length === 0)) {
+      if (
+        !scheduleMode &&
+        (batchMode || (!linkMode && savedPlaceIds.length === 0))
+      ) {
         for (const suggestion of output.data.suggestions) {
           const key = normalizedPlaceKey(suggestion.name, suggestion.locality);
           if (existingPlaceKeys.has(key) || suggestionKeys.has(key)) continue;
@@ -381,16 +388,58 @@ export function createTripChatHandler({
           if (suggestions.length >= (batchMode ? 12 : 3)) break;
         }
       }
-      const scheduledItem =
+      const rawScheduledItem =
         scheduleMode && output.data.scheduledItem
-          ? output.data.scheduledItem.savedPlaceId &&
-            boundedIds.has(output.data.scheduledItem.savedPlaceId) &&
-            authoritativeIds.has(output.data.scheduledItem.savedPlaceId) &&
-            output.data.scheduledItem.date >= trip.startDate &&
-            output.data.scheduledItem.date <= trip.endDate
-            ? output.data.scheduledItem
-            : null
+          ? output.data.scheduledItem
           : null;
+      const scheduleDateIsValid = Boolean(
+        rawScheduledItem &&
+        rawScheduledItem.date >= trip.startDate &&
+        rawScheduledItem.date <= trip.endDate,
+      );
+      const duplicateScheduledPlace = rawScheduledItem?.suggestion
+        ? trip.places.find(
+            (place) =>
+              boundedIds.has(place.id) &&
+              normalizedPlaceKey(place.name, place.locality) ===
+                normalizedPlaceKey(
+                  rawScheduledItem.suggestion?.name,
+                  rawScheduledItem.suggestion?.locality,
+                ),
+          )
+        : null;
+      const scheduledPlaceId =
+        rawScheduledItem?.savedPlaceId ?? duplicateScheduledPlace?.id ?? null;
+      const scheduleDuration =
+        rawScheduledItem?.durationMinutes ?? (contractV5 ? 120 : null);
+      const scheduleCandidate = rawScheduledItem
+        ? scheduledPlaceId &&
+          authoritativeIds.has(scheduledPlaceId) &&
+          boundedIds.has(scheduledPlaceId) &&
+          scheduleDuration !== null &&
+          scheduleDateIsValid
+          ? {
+              ...rawScheduledItem,
+              savedPlaceId: scheduledPlaceId,
+              suggestion: null,
+              durationMinutes: scheduleDuration,
+            }
+          : contractV5 && rawScheduledItem.suggestion && scheduleDateIsValid
+            ? {
+                ...rawScheduledItem,
+                savedPlaceId: null,
+                suggestion: {
+                  ...rawScheduledItem.suggestion,
+                  sourceUrl:
+                    rawScheduledItem.suggestion.sourceUrl !== null &&
+                    searchedUrls.has(rawScheduledItem.suggestion.sourceUrl)
+                      ? rawScheduledItem.suggestion.sourceUrl
+                      : null,
+                },
+                durationMinutes: scheduleDuration ?? 120,
+              }
+            : null
+        : null;
       const resultBudgetAfterSuggestions = Math.max(
         0,
         12 - savedPlaceIds.length - suggestions.length,
@@ -461,6 +510,19 @@ export function createTripChatHandler({
       });
       if (!response.success)
         throw new TripChatInvalidOutputError("Invalid normalized model output");
+      if (contractV5) {
+        const v5 = tripChatResponseV5Schema.safeParse({
+          ...response.data,
+          suggestions: scheduleMode ? [] : response.data.suggestions,
+          unresolvedPlaceNames: scheduleMode
+            ? []
+            : response.data.unresolvedPlaceNames,
+          scheduleCandidate,
+        });
+        if (!v5.success)
+          throw new TripChatInvalidOutputError("Invalid schedule response");
+        return result(v5.data);
+      }
       if (contractV4) {
         const v4 = tripChatResponseV4Schema.safeParse({
           ...response.data,
@@ -468,7 +530,15 @@ export function createTripChatHandler({
           unresolvedPlaceNames: scheduleMode
             ? []
             : response.data.unresolvedPlaceNames,
-          scheduledItem,
+          scheduledItem:
+            scheduleCandidate?.savedPlaceId && !scheduleCandidate.suggestion
+              ? {
+                  savedPlaceId: scheduleCandidate.savedPlaceId,
+                  date: scheduleCandidate.date,
+                  startTime: scheduleCandidate.startTime,
+                  durationMinutes: scheduleCandidate.durationMinutes,
+                }
+              : null,
         });
         if (!v4.success)
           throw new TripChatInvalidOutputError("Invalid schedule response");

@@ -80,6 +80,42 @@ test("adds a reviewed Ask suggestion to Ideas for collaborators without scheduli
   }
 });
 
+// @spec CHAT-BE-039, CHAT-UI-020, CHAT-UI-021, CHAT-UI-022, CHAT-UI-023
+test("confirms a new dated Ask idea and exposes it in Plan while staying in Ask", async ({
+  page,
+}) => {
+  const backend = createMockTripBackend();
+  await mockTripApi(page, backend);
+  await page.goto(`/trip#${SHARE_TOKEN}`);
+  await page.getByRole("link", { name: "Ask" }).click();
+  await page
+    .getByLabel("Ask about this trip")
+    .fill("Add San Diego Zoo to the trip Tuesday at 9 AM");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const card = page.getByRole("article", { name: "Schedule San Diego Zoo" });
+  await expect(card).toContainText("2026-09-15 · 09:00 · 120 minutes");
+  await card.getByRole("button", { name: "Confirm & add to plan" }).click();
+  await expect(card.getByText("Added to plan")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Ask about San Diego" }),
+  ).toBeVisible();
+
+  await page.getByRole("link", { name: "Plan" }).click();
+  await expect(page.getByText(/San Diego Zoo.*confirmed/i)).toBeVisible();
+  expect(backend.getTrip().places).toContainEqual(
+    expect.objectContaining({ name: "San Diego Zoo", origin: "chatgpt" }),
+  );
+  expect(backend.getTrip().itinerary).toContainEqual(
+    expect.objectContaining({
+      date: "2026-09-15",
+      startTime: "09:00",
+      durationMinutes: 120,
+      status: "confirmed",
+    }),
+  );
+});
+
 // @spec CHAT-BE-022, CHAT-BE-025, CHAT-UI-007, CHAT-UI-012, CHAT-UI-013
 test("adds a deterministic free-form suggestion batch with one trip change", async ({
   page,

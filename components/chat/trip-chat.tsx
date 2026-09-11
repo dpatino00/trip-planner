@@ -12,8 +12,8 @@ import {
   type ChatSessionMessage,
 } from "@/lib/chat/session";
 import {
-  tripChatResponseV4Schema,
-  type ScheduledItem,
+  tripChatResponseV5Schema,
+  type ScheduleCandidate,
 } from "@/lib/chat/schema";
 import { tripCopy } from "@/lib/ui/copy";
 import type { SuggestedPlace, TripDocument } from "@/lib/types";
@@ -41,7 +41,7 @@ interface TripChatProps {
   onViewSavedPlace: (placeId: string) => void;
   onTripVersion?: (version: number) => void | Promise<void>;
   onConfirmSchedule?: (
-    scheduledItem: ScheduledItem,
+    candidate: ScheduleCandidate,
   ) => Promise<ConfirmScheduleResult>;
 }
 
@@ -63,7 +63,7 @@ export function buildChatHistory(messages: ChatSessionMessage[]) {
   return newestFirst.reverse();
 }
 
-// @spec CHAT-DATA-004, CHAT-API-001, CHAT-API-011, CHAT-API-012, CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-008, CHAT-UI-009, CHAT-UI-010, CHAT-UI-012, CHAT-UI-013, CHAT-UI-014, CHAT-UI-016, PWA-UI-007
+// @spec CHAT-DATA-004, CHAT-DATA-014, CHAT-API-001, CHAT-API-011, CHAT-API-012, CHAT-API-015, CHAT-UI-002, CHAT-UI-003, CHAT-UI-004, CHAT-UI-005, CHAT-UI-006, CHAT-UI-008, CHAT-UI-009, CHAT-UI-010, CHAT-UI-012, CHAT-UI-013, CHAT-UI-014, CHAT-UI-016, CHAT-UI-020, CHAT-UI-021, CHAT-UI-022, PWA-UI-007
 export function TripChat({
   token,
   trip,
@@ -124,7 +124,7 @@ export function TripChat({
       savedPlaceIds: [],
       suggestions: [],
       unresolvedPlaceNames: [],
-      scheduledItem: null,
+      scheduleCandidate: null,
     };
     const history = buildChatHistory(messages);
     const requestCards = createCards;
@@ -139,7 +139,7 @@ export function TripChat({
         headers: {
           authorization: `Bearer ${token}`,
           "content-type": "application/json",
-          "x-trip-chat-contract": "4",
+          "x-trip-chat-contract": "5",
         },
         body: JSON.stringify({
           message,
@@ -153,7 +153,7 @@ export function TripChat({
           ?.message;
         throw new Error(message ?? "Ask is unavailable");
       }
-      const parsed = tripChatResponseV4Schema.parse(payload);
+      const parsed = tripChatResponseV5Schema.parse(payload);
       setMessages((current) =>
         [
           ...current,
@@ -164,7 +164,7 @@ export function TripChat({
             savedPlaceIds: parsed.savedPlaceIds,
             suggestions: parsed.suggestions,
             unresolvedPlaceNames: parsed.unresolvedPlaceNames,
-            scheduledItem: parsed.scheduledItem,
+            scheduleCandidate: parsed.scheduleCandidate,
           },
         ].slice(-12),
       );
@@ -228,12 +228,12 @@ export function TripChat({
 
   async function confirmSchedule(
     messageId: string,
-    scheduledItem: ScheduledItem,
+    candidate: ScheduleCandidate,
   ) {
     setScheduleStatuses((current) => ({ ...current, [messageId]: "adding" }));
     try {
       const outcome = onConfirmSchedule
-        ? await onConfirmSchedule(scheduledItem)
+        ? await onConfirmSchedule(candidate)
         : { status: "error" as const };
       setScheduleStatuses((current) => ({
         ...current,
@@ -321,13 +321,14 @@ export function TripChat({
             }
             onViewSavedPlace={onViewSavedPlace}
             scheduledPlace={
-              message.scheduledItem
-                ? (placeById.get(message.scheduledItem.savedPlaceId) ?? null)
+              message.scheduleCandidate?.savedPlaceId
+                ? (placeById.get(message.scheduleCandidate.savedPlaceId) ??
+                  null)
                 : null
             }
             scheduleStatus={scheduleStatuses[message.id] ?? "idle"}
-            onConfirmSchedule={(scheduledItem) =>
-              void confirmSchedule(message.id, scheduledItem)
+            onConfirmSchedule={(candidate) =>
+              void confirmSchedule(message.id, candidate)
             }
           />
         ))}

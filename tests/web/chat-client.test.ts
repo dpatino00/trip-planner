@@ -8,8 +8,8 @@ import {
 } from "@/lib/chat/session";
 import { SHARE_TOKEN } from "./fixtures";
 
-// @spec CHAT-DATA-004, CHAT-DATA-008, CHAT-DATA-012, SEC-DATA-007
-it("stores at most twelve version-4 messages under a hash-derived session key", async () => {
+// @spec CHAT-DATA-004, CHAT-DATA-008, CHAT-DATA-012, CHAT-DATA-014, SEC-DATA-007
+it("stores at most twelve version-5 messages under a hash-derived session key", async () => {
   const messages = Array.from({ length: 14 }, (_, index) => ({
     id: String(index),
     role: (index % 2 ? "assistant" : "user") as "assistant" | "user",
@@ -32,14 +32,14 @@ it("stores at most twelve version-4 messages under a hash-derived session key", 
     (stored.at(-1) as { unresolvedPlaceNames?: string[] } | undefined)
       ?.unresolvedPlaceNames,
   ).toEqual(["A place needing clarification"]);
-  expect(JSON.parse(sessionStorage.getItem(key) ?? "{}").version).toBe(4);
+  expect(JSON.parse(sessionStorage.getItem(key) ?? "{}").version).toBe(5);
 });
 
-// @spec CHAT-DATA-004
-it("discards version-1 and version-2 ephemeral chat history", async () => {
+// @spec CHAT-DATA-004, CHAT-DATA-014
+it("discards version-1 through version-4 ephemeral chat history", async () => {
   const currentKey = await chatSessionStorageKey(SHARE_TOKEN);
-  const oldKeys = [1, 2].map((version) =>
-    currentKey.replace("trip-chat:v3:", `trip-chat:v${version}:`),
+  const oldKeys = [1, 2, 3, 4].map((version) =>
+    currentKey.replace("trip-chat:v5:", `trip-chat:v${version}:`),
   );
   for (const [index, key] of oldKeys.entries()) {
     sessionStorage.setItem(

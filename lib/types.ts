@@ -246,7 +246,17 @@ export type TripApiMutation =
   | TripMutation
   | { type: "generate-plan-proposal" }
   | { type: "add-suggested-place"; suggestion: SuggestedPlace }
-  | { type: "add-suggested-places"; suggestions: SuggestedPlace[] };
+  | { type: "add-suggested-places"; suggestions: SuggestedPlace[] }
+  | {
+      type: "confirm-chat-schedule";
+      candidate: {
+        savedPlaceId: string | null;
+        suggestion: SuggestedPlace | null;
+        date: string;
+        startTime: string;
+        durationMinutes: number;
+      };
+    };
 
 export interface TripMutationRequest {
   baseVersion: number;

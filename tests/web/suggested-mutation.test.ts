@@ -84,6 +84,109 @@ it("adds a confirmed suggestion to Ideas only and treats duplicates as no-ops", 
   expect(duplicatePayload.duplicate).toBe(true);
 });
 
+// @spec CHAT-BE-039, CHAT-UI-021
+it("atomically saves and schedules a suggested chat candidate once", async () => {
+  const { handlers, trip } = await setup();
+  const mutationId = "89ec3145-e136-4b67-a154-c5e9a11ec3b8";
+  const body = {
+    baseVersion: trip.version,
+    mutationId,
+    mutation: {
+      type: "confirm-chat-schedule",
+      candidate: {
+        savedPlaceId: null,
+        suggestion,
+        date: "2026-09-15",
+        startTime: "09:00",
+        durationMinutes: 120,
+      },
+    },
+  };
+
+  const response = await handlers.PATCH(request(body));
+  expect(response.status).toBe(200);
+  const changed = (await response.json()).trip;
+  expect(changed.version).toBe(trip.version + 1);
+  expect(changed.places).toHaveLength(trip.places.length + 1);
+  const addedPlace = changed.places.at(-1);
+  expect(addedPlace).toMatchObject({
+    name: suggestion.name,
+    origin: "chatgpt",
+  });
+  expect(changed.itinerary.at(-1)).toMatchObject({
+    placeId: addedPlace.id,
+    date: "2026-09-15",
+    startTime: "09:00",
+    durationMinutes: 120,
+    notes: "",
+    status: "confirmed",
+  });
+
+  const replay = await handlers.PATCH(request(body));
+  const replayed = (await replay.json()).trip;
+  expect(replayed.version).toBe(changed.version);
+  expect(replayed.places).toHaveLength(changed.places.length);
+  expect(replayed.itinerary).toHaveLength(changed.itinerary.length);
+});
+
+// @spec CHAT-BE-040, CHAT-UI-021
+it("schedules an existing chat candidate without changing saved places", async () => {
+  const { handlers, trip } = await setup();
+  const response = await handlers.PATCH(
+    request({
+      baseVersion: trip.version,
+      mutationId: "4fcf798c-31aa-49d9-87d5-43af033b7760",
+      mutation: {
+        type: "confirm-chat-schedule",
+        candidate: {
+          savedPlaceId: "place-tacos",
+          suggestion: null,
+          date: "2026-09-15",
+          startTime: "09:00",
+          durationMinutes: 120,
+        },
+      },
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  const changed = (await response.json()).trip;
+  expect(changed.places).toEqual(trip.places);
+  expect(changed.itinerary.at(-1)).toMatchObject({
+    placeId: "place-tacos",
+    date: "2026-09-15",
+    startTime: "09:00",
+    durationMinutes: 120,
+    status: "confirmed",
+  });
+});
+
+// @spec CHAT-BE-039, CHAT-BE-040
+it("rejects a confirmed chat schedule outside the trip dates", async () => {
+  const { handlers, trip } = await setup();
+  const response = await handlers.PATCH(
+    request({
+      baseVersion: trip.version,
+      mutationId: "2c0fe2e9-5f7c-41a5-bc7e-ff4d77710db3",
+      mutation: {
+        type: "confirm-chat-schedule",
+        candidate: {
+          savedPlaceId: "place-tacos",
+          suggestion: null,
+          date: "2026-10-01",
+          startTime: "09:00",
+          durationMinutes: 120,
+        },
+      },
+    }),
+  );
+
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({
+    error: { code: "invalid-mutation" },
+  });
+});
+
 // @spec CHAT-BE-025, CHAT-BE-026
 it("atomically adds a deduplicated batch and treats an all-duplicate batch as a no-op", async () => {
   const { handlers, trip } = await setup();

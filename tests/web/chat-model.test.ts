@@ -131,6 +131,45 @@ it("disables web search for a schedule confirmation", async () => {
   expect(request).not.toHaveProperty("max_tool_calls");
 });
 
+// @spec CHAT-BE-037, CHAT-BE-038
+it("allows one web search and instructs a two-hour default for new schedule candidates", async () => {
+  const parse = vi.fn().mockResolvedValue({
+    status: "completed",
+    output_parsed: {
+      message: "Ready to confirm.",
+      savedPlaceIds: [],
+      savedPlaceSources: [],
+      suggestions: [],
+      unresolvedPlaceNames: [],
+      scheduledItem: null,
+    },
+    output: [],
+  });
+  const model = createOpenAITripChatModel({
+    client: { responses: { parse } },
+    model: "gpt-test",
+  });
+
+  await model.generate({
+    message: "Add San Diego Zoo to the trip Tuesday at 9 AM",
+    history: [],
+    context: {} as never,
+    mode: "schedule-new",
+  });
+
+  expect(parse).toHaveBeenCalledWith(
+    expect.objectContaining({
+      max_output_tokens: 1600,
+      max_tool_calls: 1,
+      tools: [{ type: "web_search", search_context_size: "low" }],
+    }),
+    expect.anything(),
+  );
+  const request = JSON.stringify(parse.mock.calls[0][0]);
+  expect(request).toMatch(/schedule-new/i);
+  expect(request).toMatch(/120 minutes/i);
+});
+
 // @spec CHAT-DATA-001, CHAT-DATA-005, CHAT-BE-001, CHAT-BE-029, CHAT-BE-030
 it("instructs explicit-card mode to create only named place, event, or activity cards", async () => {
   const parse = vi.fn().mockResolvedValue({

@@ -11,6 +11,10 @@ const requestedReference =
   /\b(?:find|add|attach|get|provide|give|show|look\s*up)\b[\s\S]{0,50}\b(?:link|url|website|source)\b|\b(?:what|where)(?:'s|\s+is)\b[\s\S]{0,50}\b(?:link|url|website|source)\b|\b(?:link|url|website|source)\b[\s\S]{0,30}\bfor\b/i;
 const scheduleRequest =
   /\b(?:schedule|put)\b|\badd\b[\s\S]{0,60}\b(?:to|into)\s+(?:my\s+|the\s+)?(?:plan|itinerary)\b/i;
+const addToTripRequest =
+  /\badd\b[\s\S]{0,60}\b(?:to|into)\s+(?:my\s+|the\s+)?trip\b/i;
+const scheduleDetail =
+  /\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b|\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b/i;
 
 // @spec CHAT-BE-010, CHAT-BE-020
 export function hasExplicitSavedPlaceLookupIntent(message: string) {
@@ -35,9 +39,12 @@ export function hasExplicitLinkEnrichmentIntent(message: string) {
   return requestedReference.test(message);
 }
 
-// @spec CHAT-BE-033
+// @spec CHAT-BE-033, CHAT-BE-037
 export function hasExplicitScheduleIntent(message: string) {
-  return scheduleRequest.test(message);
+  return (
+    scheduleRequest.test(message) ||
+    (addToTripRequest.test(message) && scheduleDetail.test(message))
+  );
 }
 
 export function hasExplicitSavedPlaceIntent(message: string) {
