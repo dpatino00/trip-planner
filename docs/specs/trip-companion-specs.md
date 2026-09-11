@@ -210,6 +210,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-BE-040**: When a traveler confirms a version-5 saved schedule candidate, the trip API shall add one confirmed itinerary item without adding or modifying a saved place.
 - [x] **CHAT-BE-041**: While recent Ask history contains an unresolved schedule request, when the traveler supplies or confirms a missing name, date, time, duration, or confirmation in a follow-up message, embedded Ask shall continue version-5 schedule mode and combine the scheduling details across that history without requesting an already supplied detail again.
 - [x] **CHAT-BE-042**: When a version-5 scheduling thread names an authoritative saved idea outside the ordinary bounded-context slice, embedded Ask shall prioritize that exact named idea into the bounded context so the model can return its authoritative saved-place ID.
+- [x] **CHAT-BE-043**: When a version-5 scheduling thread's traveler-authored turns contain exactly one full authoritative saved-idea name, one inclusive ISO or relative date, and one local start time, if the model omits a schedule candidate, embedded Ask shall return a non-mutating candidate for that saved idea using the supplied duration or the 120-minute default.
 
 ## Embedded Ask Interface
 

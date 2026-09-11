@@ -8,6 +8,7 @@ import {
 } from "@/lib/chat/intent";
 import type { TripChatModel, TripChatUsage } from "@/lib/chat/model";
 import { TripChatInvalidOutputError } from "@/lib/chat/model";
+import { resolveSavedScheduleFromConversation } from "@/lib/chat/schedule";
 import {
   tripChatCandidateResponseSchema,
   tripChatRequestSchema,
@@ -183,7 +184,7 @@ async function withTimeout<T>(
   }
 }
 
-// @spec CHAT-DATA-002, CHAT-DATA-005, CHAT-DATA-007, CHAT-DATA-013, CHAT-API-001, CHAT-API-002, CHAT-API-003, CHAT-API-004, CHAT-API-005, CHAT-API-006, CHAT-API-007, CHAT-API-008, CHAT-API-009, CHAT-API-010, CHAT-API-011, CHAT-API-012, CHAT-API-013, CHAT-API-015, CHAT-BE-002, CHAT-BE-009, CHAT-BE-010, CHAT-BE-011, CHAT-BE-012, CHAT-BE-013, CHAT-BE-015, CHAT-BE-020, CHAT-BE-021, CHAT-BE-022, CHAT-BE-029, CHAT-BE-030, CHAT-BE-031, CHAT-BE-032, CHAT-BE-037, CHAT-BE-038
+// @spec CHAT-DATA-002, CHAT-DATA-005, CHAT-DATA-007, CHAT-DATA-013, CHAT-API-001, CHAT-API-002, CHAT-API-003, CHAT-API-004, CHAT-API-005, CHAT-API-006, CHAT-API-007, CHAT-API-008, CHAT-API-009, CHAT-API-010, CHAT-API-011, CHAT-API-012, CHAT-API-013, CHAT-API-015, CHAT-BE-002, CHAT-BE-009, CHAT-BE-010, CHAT-BE-011, CHAT-BE-012, CHAT-BE-013, CHAT-BE-015, CHAT-BE-020, CHAT-BE-021, CHAT-BE-022, CHAT-BE-029, CHAT-BE-030, CHAT-BE-031, CHAT-BE-032, CHAT-BE-037, CHAT-BE-038, CHAT-BE-043
 export function createTripChatHandler({
   repository,
   rateLimiter,
@@ -394,10 +395,18 @@ export function createTripChatHandler({
           if (suggestions.length >= (batchMode ? 12 : 3)) break;
         }
       }
-      const rawScheduledItem =
-        scheduleMode && output.data.scheduledItem
-          ? output.data.scheduledItem
+      const deterministicSchedule =
+        contractV5 && scheduleMode && context.today
+          ? resolveSavedScheduleFromConversation({
+              trip,
+              today: context.today,
+              message: parsed.data.message,
+              history: parsed.data.history,
+            })
           : null;
+      const rawScheduledItem = scheduleMode
+        ? (output.data.scheduledItem ?? deterministicSchedule)
+        : null;
       const scheduleDateIsValid = Boolean(
         rawScheduledItem &&
         rawScheduledItem.date >= trip.startDate &&
@@ -499,7 +508,10 @@ export function createTripChatHandler({
         responsePlaceIds.has(id),
       );
       const response = tripChatResponseSchema.safeParse({
-        message: output.data.message,
+        message:
+          deterministicSchedule && !output.data.scheduledItem
+            ? `Review the schedule for ${trip.places.find((place) => place.id === deterministicSchedule.savedPlaceId)?.name ?? "this saved idea"}.`
+            : output.data.message,
         savedPlaceIds: finalSavedPlaceIds,
         suggestions: batchMode
           ? suggestions.slice(0, Math.max(0, 12 - finalSavedPlaceIds.length))

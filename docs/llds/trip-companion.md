@@ -465,6 +465,13 @@ normal count and serialized-size caps are applied, context construction
 prioritizes authoritative places whose normalized names occur in the current
 scheduling thread. This keeps an explicitly named saved idea resolvable even
 when it was inserted after the ordinary context slice.
+For version-five saved-idea schedules, the handler also derives an exact
+authoritative fallback from traveler-authored conversation turns. When those
+turns contain exactly one full saved-idea name, an inclusive ISO or relative
+date, and a local start time, the handler returns the reviewable saved-place
+candidate even if the model omits it. The same two-hour default applies when no
+duration was supplied. This fallback changes no trip state and never creates a
+new idea; confirmation remains a separate authenticated mutation.
 Version four, version three, version two, and headerless callers retain their
 current response shapes.
 

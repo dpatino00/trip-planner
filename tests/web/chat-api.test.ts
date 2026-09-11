@@ -214,16 +214,13 @@ it("returns a default-duration schedule candidate for a new named place without 
   expect(update).not.toHaveBeenCalled();
 });
 
-// @spec CHAT-BE-041, CHAT-BE-042
-it("continues a multi-turn schedule and prioritizes its saved idea into bounded context", async () => {
-  const fillerPlaces = Array.from(
-    { length: 24 },
-    (_, index) => ({
-      ...makeTripV2().places[0],
-      id: `place-filler-${index}`,
-      name: `Filler Place ${index}`,
-    }),
-  );
+// @spec CHAT-BE-041, CHAT-BE-042, CHAT-BE-043
+it("continues a multi-turn saved schedule when the model omits its candidate", async () => {
+  const fillerPlaces = Array.from({ length: 24 }, (_, index) => ({
+    ...makeTripV2().places[0],
+    id: `place-filler-${index}`,
+    name: `Filler Place ${index}`,
+  }));
   const baliHai = {
     ...makeTripV2().places[0],
     id: "place-bali-hai",
@@ -239,13 +236,7 @@ it("continues a multi-turn schedule and prioritizes its saved idea into bounded 
         savedPlaceSources: [],
         suggestions: [],
         unresolvedPlaceNames: [],
-        scheduledItem: {
-          savedPlaceId: "place-bali-hai",
-          suggestion: null,
-          date: "2026-09-17",
-          startTime: "21:00",
-          durationMinutes: 120,
-        },
+        scheduledItem: null,
       },
     }),
   };
