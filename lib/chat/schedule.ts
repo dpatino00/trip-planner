@@ -31,9 +31,75 @@ function dateAtOffset(today: string, offset: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function scheduleDate(text: string, today: string, tripStartDate: string) {
+function scheduleDate(
+  text: string,
+  today: string,
+  tripStartDate: string,
+  tripEndDate: string,
+) {
   const isoDates = [...text.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)];
   if (isoDates.length > 0) return isoDates.at(-1)?.[0] ?? null;
+
+  const months = new Map([
+    ["january", 1],
+    ["jan", 1],
+    ["february", 2],
+    ["feb", 2],
+    ["march", 3],
+    ["mar", 3],
+    ["april", 4],
+    ["apr", 4],
+    ["may", 5],
+    ["june", 6],
+    ["jun", 6],
+    ["july", 7],
+    ["jul", 7],
+    ["august", 8],
+    ["aug", 8],
+    ["september", 9],
+    ["sep", 9],
+    ["sept", 9],
+    ["october", 10],
+    ["oct", 10],
+    ["november", 11],
+    ["nov", 11],
+    ["december", 12],
+    ["dec", 12],
+  ]);
+  const monthDates = [
+    ...text.matchAll(
+      /\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:,?\s+(\d{4}))?\b/gi,
+    ),
+  ];
+  const monthMatch = monthDates.at(-1);
+  if (monthMatch) {
+    const month = months.get(monthMatch[1].toLocaleLowerCase());
+    const day = Number(monthMatch[2]);
+    if (month && day >= 1 && day <= 31) {
+      const years = monthMatch[3]
+        ? [Number(monthMatch[3])]
+        : [
+            Number(tripStartDate.slice(0, 4)),
+            Number(tripStartDate.slice(0, 4)) + 1,
+            Number(today.slice(0, 4)),
+          ];
+      for (const year of years) {
+        const candidate: string = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        const parsed: Date = new Date(`${candidate}T00:00:00Z`);
+        if (
+          parsed.getUTCFullYear() === year &&
+          parsed.getUTCMonth() + 1 === month &&
+          parsed.getUTCDate() === day
+        ) {
+          if (
+            monthMatch[3] ||
+            (candidate >= tripStartDate && candidate <= tripEndDate)
+          )
+            return candidate;
+        }
+      }
+    }
+  }
 
   const relativeDays = [...text.matchAll(/\b(today|tomorrow)\b/gi)];
   if (relativeDays.length > 0)
@@ -130,6 +196,7 @@ export function resolveSavedScheduleFromConversation(options: {
     travelerText,
     options.today,
     options.trip.startDate,
+    options.trip.endDate,
   );
   const startTime = scheduleStartTime(travelerText);
   const durationMinutes = scheduleDuration(travelerText);

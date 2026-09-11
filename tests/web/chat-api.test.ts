@@ -334,6 +334,57 @@ it("derives an in-trip schedule from natural timed-add wording", async () => {
   );
 });
 
+// @spec CHAT-BE-043, CHAT-BE-044, CHAT-BE-045
+it("derives a schedule from a month-and-day request across follow-ups", async () => {
+  const ironside = {
+    ...makeTripV2().places[0],
+    id: "place-ironside",
+    name: "Ironside Fish & Oyster",
+    locality: "Little Italy, San Diego",
+  };
+  const trip = makeTripV2({ places: [...makeTripV2().places, ironside] });
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "I need the duration.",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduledItem: null,
+      },
+    }),
+  };
+  const { POST } = await setup({ model, trip });
+  const response = await POST(
+    chatRequest(
+      {
+        message: "yes for 2 hours",
+        history: [
+          {
+            role: "user",
+            content: "Please add the Ironside oyster for 9 PM september 17",
+          },
+          {
+            role: "assistant",
+            content:
+              "I can schedule the saved place Ironside Fish & Oyster. How long should I schedule it for?",
+          },
+        ],
+      },
+      { token: SHARE_TOKEN, contractVersion: 5 },
+    ),
+  );
+  expect(await response.json()).toMatchObject({
+    scheduleCandidate: {
+      savedPlaceId: "place-ironside",
+      date: "2026-09-17",
+      startTime: "21:00",
+      durationMinutes: 120,
+    },
+  });
+});
+
 // @spec CHAT-BE-035
 it("drops a schedule candidate outside the trip range", async () => {
   const model: TripChatModel = {

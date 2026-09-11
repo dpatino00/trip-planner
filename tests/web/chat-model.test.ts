@@ -243,6 +243,13 @@ it("recognizes a timed add request without plan-specific wording", () => {
   ).toBe(true);
 });
 
+// @spec CHAT-BE-044
+it("recognizes a month-and-day timed add request", () => {
+  expect(
+    hasScheduleIntent("Please add the Ironside oyster for 9 PM september 17"),
+  ).toBe(true);
+});
+
 // @spec CHAT-UI-024
 it.each(["confirm", "confirm it", "yes", "yep", "do it", "please do"])(
   "recognizes concise schedule confirmation %j",

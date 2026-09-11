@@ -14,7 +14,7 @@ const scheduleRequest =
 const addToTripRequest =
   /\badd\b[\s\S]{0,60}\b(?:to|into)\s+(?:my\s+|the\s+)?trip\b/i;
 const scheduleDateDetail =
-  /\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b/i;
+  /\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|\d{4}-\d{2}-\d{2})\b/i;
 const scheduleTimeDetail =
   /\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b|\b(?:[01]\d|2[0-3]):[0-5]\d\b/i;
 const scheduleDetail = new RegExp(
@@ -79,6 +79,7 @@ export function hasScheduleConfirmationIntent(message: string) {
     "yep",
     "do it",
     "please do",
+    "yes please",
     "add it",
     "looks good",
     "that works",

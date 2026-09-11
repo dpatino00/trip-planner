@@ -214,7 +214,7 @@ it("uses a typed confirmation to add the latest pending schedule card", async ()
   const card = await screen.findByRole("article", {
     name: "Schedule Oscar's Mexican Seafood",
   });
-  fireEvent.change(composer, { target: { value: "confirm" } });
+  fireEvent.change(composer, { target: { value: "yes please" } });
   fireEvent.keyDown(composer, { key: "Enter" });
 
   await waitFor(() =>
