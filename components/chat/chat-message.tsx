@@ -10,7 +10,7 @@ import {
   ScheduleCard,
   type ScheduleStatus,
 } from "@/components/chat/schedule-card";
-import type { ScheduledItem } from "@/lib/chat/schema";
+import type { ScheduleCandidate } from "@/lib/chat/schema";
 
 interface ChatMessageProps {
   message: ChatSessionMessage;
@@ -23,7 +23,7 @@ interface ChatMessageProps {
   onViewSavedPlace: (placeId: string) => void;
   scheduledPlace: SavedPlace | null;
   scheduleStatus: ScheduleStatus;
-  onConfirmSchedule: (scheduledItem: ScheduledItem) => void;
+  onConfirmSchedule: (candidate: ScheduleCandidate) => void;
 }
 
 // @spec CHAT-UI-002, CHAT-UI-006, CHAT-UI-012, CHAT-UI-013, CHAT-UI-014
@@ -103,13 +103,14 @@ export function ChatMessage({
           ))}
         </div>
       ) : null}
-      {message.scheduledItem && scheduledPlace ? (
+      {message.scheduleCandidate &&
+      (scheduledPlace || message.scheduleCandidate.suggestion) ? (
         <ScheduleCard
           place={scheduledPlace}
-          scheduledItem={message.scheduledItem}
+          candidate={message.scheduleCandidate}
           status={scheduleStatus}
           online={online}
-          onConfirm={() => onConfirmSchedule(message.scheduledItem!)}
+          onConfirm={() => onConfirmSchedule(message.scheduleCandidate!)}
         />
       ) : null}
       {message.unresolvedPlaceNames.length > 0 ? (

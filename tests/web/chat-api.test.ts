@@ -34,7 +34,7 @@ function chatRequest(
     token?: string;
     ip?: string;
     raw?: string;
-    contractVersion?: 2 | 3 | 4 | null;
+    contractVersion?: 2 | 3 | 4 | 5 | null;
   } = {},
 ) {
   const headers = new Headers({
@@ -103,6 +103,287 @@ it("returns a validated schedule candidate without mutating the trip", async () 
   expect(update).not.toHaveBeenCalled();
 });
 
+// @spec CHAT-DATA-013, CHAT-API-015, CHAT-BE-037, CHAT-BE-038
+it("returns a version-5 default-duration candidate for an existing saved place", async () => {
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Here is the plan confirmation.",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduledItem: {
+          savedPlaceId: "place-tacos",
+          suggestion: null,
+          date: "2026-09-15",
+          startTime: "09:00",
+          durationMinutes: null,
+        },
+      },
+    }),
+  };
+  const { POST, repository } = await setup({ model });
+  const update = vi.spyOn(repository, "update");
+
+  const response = await POST(
+    chatRequest(
+      { message: "Add Tacos to my trip Tuesday at 9 AM", history: [] },
+      { token: SHARE_TOKEN, contractVersion: 5 },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    scheduleCandidate: {
+      savedPlaceId: "place-tacos",
+      suggestion: null,
+      date: "2026-09-15",
+      startTime: "09:00",
+      durationMinutes: 120,
+    },
+  });
+  expect(vi.mocked(model.generate)).toHaveBeenCalledWith(
+    expect.objectContaining({ mode: "schedule-new" }),
+  );
+  expect(update).not.toHaveBeenCalled();
+});
+
+// @spec CHAT-DATA-013, CHAT-API-015, CHAT-BE-037, CHAT-BE-038
+it("returns a default-duration schedule candidate for a new named place without mutating the trip", async () => {
+  const zooSuggestion = {
+    ...suggestion,
+    name: "San Diego Zoo",
+    summary: "A major wildlife park in Balboa Park with broad animal exhibits.",
+    locality: "Balboa Park",
+    interests: ["wildlife"],
+    tags: ["wildlife", "zoo"],
+    profile: "outdoor",
+    durationMinutes: 180,
+    costLevel: 3,
+    reservationRecommended: true,
+    sourceUrl: "https://sandiegozoowildlifealliance.org/",
+  };
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Here is the plan confirmation.",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduledItem: {
+          savedPlaceId: null,
+          suggestion: zooSuggestion,
+          date: "2026-09-15",
+          startTime: "09:00",
+          durationMinutes: null,
+        },
+      },
+      sources: [zooSuggestion.sourceUrl],
+    }),
+  };
+  const { POST, repository } = await setup({ model });
+  const update = vi.spyOn(repository, "update");
+
+  const response = await POST(
+    chatRequest(
+      {
+        message: "Add San Diego Zoo to the trip Tuesday at 9 AM",
+        history: [],
+      },
+      { token: SHARE_TOKEN, contractVersion: 5 },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    scheduleCandidate: {
+      savedPlaceId: null,
+      suggestion: zooSuggestion,
+      date: "2026-09-15",
+      startTime: "09:00",
+      durationMinutes: 120,
+    },
+    suggestions: [],
+    unresolvedPlaceNames: [],
+  });
+  expect(vi.mocked(model.generate)).toHaveBeenCalledWith(
+    expect.objectContaining({ mode: "schedule-new" }),
+  );
+  expect(update).not.toHaveBeenCalled();
+});
+
+// @spec CHAT-BE-041, CHAT-BE-042, CHAT-BE-043
+it("continues a multi-turn saved schedule when the model omits its candidate", async () => {
+  const fillerPlaces = Array.from({ length: 24 }, (_, index) => ({
+    ...makeTripV2().places[0],
+    id: `place-filler-${index}`,
+    name: `Filler Place ${index}`,
+  }));
+  const baliHai = {
+    ...makeTripV2().places[0],
+    id: "place-bali-hai",
+    name: "Bali Hai Restaurant",
+    locality: "Shelter Island, CA",
+  };
+  const trip = makeTripV2({ places: [...fillerPlaces, baliHai] });
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Ready to confirm.",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduledItem: null,
+      },
+    }),
+  };
+  const { POST } = await setup({ model, trip });
+
+  const response = await POST(
+    chatRequest(
+      {
+        message: "2 hours",
+        history: [
+          {
+            role: "user",
+            content:
+              "Put Bali Hai Restaurant on the plan next Thursday at 9 PM",
+          },
+          {
+            role: "assistant",
+            content: "What duration should I use to finish the schedule card?",
+          },
+        ],
+      },
+      { token: SHARE_TOKEN, contractVersion: 5 },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    scheduleCandidate: {
+      savedPlaceId: "place-bali-hai",
+      date: "2026-09-17",
+      startTime: "21:00",
+      durationMinutes: 120,
+    },
+  });
+  expect(model.generate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      mode: "schedule-new",
+      context: expect.objectContaining({
+        places: expect.arrayContaining([
+          expect.objectContaining({
+            id: "place-bali-hai",
+            name: "Bali Hai Restaurant",
+          }),
+        ]),
+      }),
+    }),
+  );
+});
+
+// @spec CHAT-BE-043, CHAT-BE-044, CHAT-BE-045, CHAT-BE-046
+it("derives an in-trip schedule from natural timed-add wording", async () => {
+  const ironside = {
+    ...makeTripV2().places[0],
+    id: "place-ironside",
+    name: "Ironside Fish & Oyster",
+    locality: "Little Italy, San Diego",
+  };
+  const trip = makeTripV2({ places: [...makeTripV2().places, ironside] });
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Ready to confirm.",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduledItem: null,
+      },
+    }),
+  };
+  const { POST } = await setup({ model, trip });
+
+  const response = await POST(
+    chatRequest(
+      {
+        message: "Please add the Ironside oyster for 9 PM september 17",
+        history: [],
+      },
+      { token: SHARE_TOKEN, contractVersion: 5 },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    scheduleCandidate: {
+      savedPlaceId: "place-ironside",
+      date: "2026-09-17",
+      startTime: "21:00",
+      durationMinutes: 120,
+    },
+  });
+  expect(model.generate).toHaveBeenCalledWith(
+    expect.objectContaining({ mode: "schedule-new" }),
+  );
+});
+
+// @spec CHAT-BE-043, CHAT-BE-044, CHAT-BE-045
+it("derives a schedule from a month-and-day request across follow-ups", async () => {
+  const ironside = {
+    ...makeTripV2().places[0],
+    id: "place-ironside",
+    name: "Ironside Fish & Oyster",
+    locality: "Little Italy, San Diego",
+  };
+  const trip = makeTripV2({ places: [...makeTripV2().places, ironside] });
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "I need the duration.",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduledItem: null,
+      },
+    }),
+  };
+  const { POST } = await setup({ model, trip });
+  const response = await POST(
+    chatRequest(
+      {
+        message: "yes for 2 hours",
+        history: [
+          {
+            role: "user",
+            content: "Please add the Ironside oyster for 9 PM september 17",
+          },
+          {
+            role: "assistant",
+            content:
+              "I can schedule the saved place Ironside Fish & Oyster. How long should I schedule it for?",
+          },
+        ],
+      },
+      { token: SHARE_TOKEN, contractVersion: 5 },
+    ),
+  );
+  expect(await response.json()).toMatchObject({
+    scheduleCandidate: {
+      savedPlaceId: "place-ironside",
+      date: "2026-09-17",
+      startTime: "21:00",
+      durationMinutes: 120,
+    },
+  });
+});
+
 // @spec CHAT-BE-035
 it("drops a schedule candidate outside the trip range", async () => {
   const model: TripChatModel = {
@@ -129,6 +410,37 @@ it("drops a schedule candidate outside the trip range", async () => {
       { token: SHARE_TOKEN, contractVersion: 4 },
     ),
   );
+  expect((await response.json()).scheduledItem).toBeNull();
+});
+
+// @spec CHAT-API-014, CHAT-BE-035
+it("preserves version-4 clarification when schedule duration is missing", async () => {
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "How long should I plan for?",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduledItem: {
+          savedPlaceId: "place-tacos",
+          suggestion: null,
+          date: "2026-09-15",
+          startTime: "09:00",
+          durationMinutes: null,
+        },
+      },
+    }),
+  };
+  const { POST } = await setup({ model });
+  const response = await POST(
+    chatRequest(
+      { message: "Add Tacos to my plan Tuesday at 9 AM", history: [] },
+      { token: SHARE_TOKEN, contractVersion: 4 },
+    ),
+  );
+
   expect((await response.json()).scheduledItem).toBeNull();
 });
 

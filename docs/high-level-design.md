@@ -1,7 +1,7 @@
 # Conversational Trip Companion — High-Level Design
 
 **Created**: 2026-09-01
-**Last updated**: 2026-09-08
+**Last updated**: 2026-09-11
 
 ## Problem Statement
 
@@ -16,13 +16,21 @@ The Trip Companion will be a mobile-first shared trip website with an embedded
 Ask experience. Travelers can ask for contextual advice and receive reviewable
 trip-idea cards without leaving the trip; saved ideas are surfaced when the
 traveler explicitly asks about them. Ask can resolve one explicit request to
-schedule an existing saved idea with a date, time, and duration into a
-reviewable confirmation card; only traveler confirmation creates the itinerary
-item. A one-message Create cards control turns
-up to twelve explicitly named places, events, or activities from free-form
-prose, lists, or tables into saved matches, new cards, and unresolved names
-without relying on trigger wording. Only an explicit individual or bulk Add to
-trip action adds a new idea to the shared plan. A traveler may explicitly ask
+schedule an existing saved idea or one newly named idea with a date and time
+into a reviewable confirmation card; only traveler confirmation creates the
+itinerary item and, when needed, the saved idea. A missing duration defaults to
+two hours. Natural timed-add wording enters the same scheduling flow, and an
+unqualified weekday resolves to the matching day inside the trip window. Short
+follow-up replies continue the active scheduling request, so
+the traveler can provide the date, time, duration, or saved idea across several
+turns without restarting. Saved ideas named in that scheduling thread are
+prioritized into the bounded model context. The traveler may confirm a visible
+schedule card either with its button or a concise chat confirmation; both use
+the same authenticated mutation. A one-message Create cards control
+turns up to twelve explicitly named places, events, or activities from
+free-form prose, lists, or tables into saved matches, new cards, and unresolved
+names without relying on trigger wording. Only an explicit individual or bulk
+Add to trip action adds a new idea to the shared plan. A traveler may explicitly ask
 Ask to find a link for a named saved idea that lacks one; the server may attach
 only an exact HTTPS reference found in that request's bounded web search. The
 shared trip remains the visual and durable source of truth. A private Custom
@@ -41,7 +49,10 @@ GPT may continue to use authenticated Actions as an optional secondary client.
   saved matches, new cards, and names requiring clarification.
 - Provide a one-message Create cards control that deterministically requests
   cards for named trip ideas without depending on conversational trigger words.
-- Require explicit confirmation before an AI suggestion or schedule changes shared state.
+- Require one explicit confirmation before an AI suggestion or schedule changes shared state.
+- Let one confirmation atomically save and schedule a newly named idea, or
+  schedule an existing saved idea, while immediately refreshing shared trip
+  state for the Plan view.
 - Let travelers confirm generated places individually or add all valid new
   suggestions in one atomic trip update.
 - On an explicit traveler request, add a search-grounded reference link to a
@@ -82,8 +93,8 @@ GPT may continue to use authenticated Actions as an optional secondary client.
   response to an explicit traveler request.
 - Allowing the GPT to edit application code, deploy the website, make bookings,
   purchase anything, or delete a trip.
-- Letting embedded Ask directly create itinerary items, evaluate availability,
-  or declare a timed plan conflict-free.
+- Letting embedded Ask create itinerary items without traveler confirmation,
+  evaluate availability, or declare a timed plan conflict-free.
 - Letting automated optimization silently overwrite confirmed itinerary choices.
 - Building a persistent job queue or autonomous agent loop; initial optimization
   runs as part of relevant API mutations and stores a proposal for review.

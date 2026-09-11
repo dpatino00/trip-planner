@@ -258,6 +258,43 @@ export function createTripHandlers({
               });
             }
             changed = next;
+          } else if (requestBody.mutation.type === "confirm-chat-schedule") {
+            // @spec CHAT-BE-039, CHAT-BE-040
+            const { candidate } = requestBody.mutation;
+            if (
+              candidate.date < current.startDate ||
+              candidate.date > current.endDate
+            ) {
+              throw new Error("Schedule date is outside the trip");
+            }
+            let next = current;
+            let placeId = candidate.savedPlaceId;
+            if (candidate.suggestion) {
+              const created = createSuggestedPlace(
+                candidate.suggestion,
+                next.places,
+                { clock, idFactory },
+              );
+              placeId = created.place.id;
+              if (!created.duplicate) {
+                next = applyTripMutation(next, {
+                  type: "add-place",
+                  place: created.place,
+                });
+              }
+            }
+            if (!placeId) throw new Error("Schedule place is required");
+            changed = applyTripMutation(next, {
+              type: "add-itinerary-item",
+              item: {
+                placeId,
+                date: candidate.date,
+                startTime: candidate.startTime,
+                durationMinutes: candidate.durationMinutes,
+                notes: "",
+                status: "confirmed",
+              },
+            });
           } else {
             changed = applyTripMutation(current, requestBody.mutation);
           }

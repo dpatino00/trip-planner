@@ -281,6 +281,27 @@ const mutation = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
+      type: z.literal("confirm-chat-schedule"),
+      candidate: z
+        .object({
+          savedPlaceId: z.string().trim().min(1).max(120).nullable(),
+          suggestion: suggestedPlaceSchema.nullable(),
+          date,
+          startTime: time,
+          durationMinutes: z.number().int().min(15).max(1440),
+        })
+        .strict()
+        .refine(
+          (value) =>
+            Number(value.savedPlaceId !== null) +
+              Number(value.suggestion !== null) ===
+            1,
+          "Chat schedule must have exactly one place source",
+        ),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("update-place"),
       placeId: z.string().min(1),
       changes: placeChanges,

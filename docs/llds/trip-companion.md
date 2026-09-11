@@ -447,14 +447,37 @@ interface TripChatModelResponse {
 }
 ```
 
-Contract version four adds a nullable `scheduledItem` response field with one
-saved-place ID, an inclusive trip date, a local `HH:MM` start time, and a
-15–1,440-minute duration. The compact context includes the server-resolved
-destination-local current date so relative dates resolve deterministically.
-Schedule mode accepts a candidate only when it references one authoritative
-bounded saved idea and all schedule values validate. It performs no web search
-or repository update, and asks for clarification when the request is incomplete
-or ambiguous. Version three, version two, and headerless callers retain their
+Contract version four retains its nullable saved-place-only `scheduledItem`.
+Contract version five adds a nullable schedule candidate with an inclusive trip
+date, local `HH:MM` start time, 15–1,440-minute duration, and exactly one place
+source: an authoritative saved-place ID or one validated `SuggestedPlace`.
+The compact context includes the server-resolved destination-local current date
+so relative dates resolve deterministically. Schedule mode prefers one exact
+authoritative saved match and otherwise may use one exact generated suggestion
+grounded by the request's bounded web search. If the traveler supplies no
+duration, the candidate uses 120 minutes. It performs no repository update and
+asks for clarification when the name, date, or time is incomplete or ambiguous.
+When the recent conversation contains an unresolved schedule request, a short
+reply that supplies or confirms a name, date, time, duration, or confirmation
+continues schedule mode. The model combines the current reply with the recent
+conversation and does not request a detail already supplied there. Before the
+normal count and serialized-size caps are applied, context construction
+prioritizes authoritative places whose normalized names occur in the current
+scheduling thread. This keeps an explicitly named saved idea resolvable even
+when it was inserted after the ordinary context slice.
+For version-five saved-idea schedules, the handler also derives an exact
+authoritative fallback from traveler-authored conversation turns. When those
+turns contain exactly one full saved-idea name, an inclusive ISO or relative
+date, and a local start time, the handler returns the reviewable saved-place
+candidate even if the model omits it. The same two-hour default applies when no
+duration was supplied. This fallback changes no trip state and never creates a
+new idea; confirmation remains a separate authenticated mutation.
+Natural requests that use `add` with both a date or weekday and a local time
+select schedule mode even when they omit “to the plan.” For an unqualified
+weekday, deterministic resolution starts at the later of the destination-local
+current date and the trip start date, selecting the first matching weekday in
+the inclusive trip window. Explicit `next` weekdays retain next-week semantics.
+Version four, version three, version two, and headerless callers retain their
 current response shapes.
 
 `SuggestedPlace` remains the transport and storage-adapter name for backward
@@ -515,8 +538,9 @@ never count as evidence. In addition or explicit-card mode, an ungrounded
 candidate URL is stripped while the otherwise valid suggestion is retained as
 Maps-only.
 
-The current browser sends `x-trip-chat-contract: 4`. It receives every
-version-three field plus `scheduledItem`. A version-two request receives its prior four-field shape,
+The current browser sends `x-trip-chat-contract: 5`. It receives every
+version-three field plus `scheduleCandidate`. A version-four request receives
+its prior saved-place-only `scheduledItem`. A version-two request receives its prior four-field shape,
 three-item caps, required suggestion sources, and saved-match suppression. A
 headerless request receives only `message` and up to three sourced suggestions.
 This rolling-compatibility rule prevents cached clients from rejecting additive
@@ -556,6 +580,14 @@ no-op. A malformed member rejects the mutation before any write. The existing
 mutation ID, one-conflict retry, and post-response-loss reconciliation rules
 apply to the whole batch. Neither individual nor bulk confirmation schedules a
 place.
+
+The browser confirms a version-five schedule candidate through one versioned
+`confirm-chat-schedule` mutation. A saved candidate adds a confirmed itinerary
+item. A suggested candidate is normalized through the shared place factory and
+atomically adds or reuses the matching place before adding the confirmed
+itinerary item. The mutation increments the trip version once, participates in
+the existing mutation-ID retry and reconciliation behavior, and never leaves a
+new idea saved without its requested itinerary item.
 
 Chat is limited to twenty-five requests per hashed trip/address pair per ten
 minutes and two hundred fifty requests per hashed trip per UTC day. A batch
@@ -776,12 +808,16 @@ plus a supplied source link when present. They retain explicit **Add to trip**
 and session-local **Dismiss** controls and expose saved, duplicate, or retry
 states.
 
-When a version-four response contains a valid scheduled item, Ask renders a
-plan-confirmation card with the authoritative saved idea, resolved date, local
-start time, and duration. **Confirm & add to plan** sends the existing
-authenticated versioned `add-itinerary-item` mutation with empty notes and
-confirmed status. Existing retry and failure behavior applies; the card does not
-assert availability or check timed overlaps.
+When a version-five response contains a valid schedule candidate, Ask renders a
+plan-confirmation card with the authoritative saved idea or generated new idea,
+resolved date, local start time, and duration. **Confirm & add to plan** sends
+the authenticated versioned `confirm-chat-schedule` mutation with empty notes
+and confirmed status. Existing retry and failure behavior applies. Success
+updates SWR and the offline trip snapshot while Ask remains active, so Plan is
+current when opened. The card does not assert availability or check timed
+overlaps. While a pending schedule card is visible, a concise confirmation such
+as “confirm,” “yes,” or “do it” invokes that same mutation directly without
+sending another model request.
 
 When an assistant response contains more than one new suggestion, Ask also shows
 **Add all new**. Activating it sends one atomic batch mutation and marks each

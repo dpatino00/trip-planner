@@ -56,6 +56,35 @@ export async function mockTripApi(
       message?: string;
       createCards?: boolean;
     };
+    if (/san diego zoo/i.test(request.message ?? "")) {
+      return json(route, {
+        message: "Ready to confirm this stop.",
+        savedPlaceIds: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduleCandidate: {
+          savedPlaceId: null,
+          suggestion: {
+            name: "San Diego Zoo",
+            summary:
+              "A major wildlife park in Balboa Park with broad animal exhibits.",
+            locality: "Balboa Park",
+            interests: ["wildlife"],
+            tags: ["wildlife", "zoo"],
+            profile: "outdoor",
+            preferredDayparts: ["morning"],
+            durationMinutes: 180,
+            costLevel: 3,
+            reservationRecommended: true,
+            sourceUrl: "https://sandiegozoowildlifealliance.org/",
+          },
+          date: "2026-09-15",
+          startTime: "09:00",
+          durationMinutes: 120,
+        },
+        tripVersion: backend.getTrip().version,
+      });
+    }
     if (
       /torrey pines/i.test(request.message ?? "") &&
       /link|url|website|source/i.test(request.message ?? "")
@@ -235,6 +264,57 @@ export async function mockTripApi(
         itinerary: trip.itinerary.filter(
           (item: { placeId: string }) => item.placeId !== mutation.placeId,
         ),
+      };
+    } else if (mutation.type === "confirm-chat-schedule") {
+      const timestamp = "2026-09-06T12:00:00.000Z";
+      const candidate = mutation.candidate;
+      const existing = candidate.savedPlaceId
+        ? trip.places.find(
+            (place: SavedPlace) => place.id === candidate.savedPlaceId,
+          )
+        : trip.places.find(
+            (place: SavedPlace) =>
+              place.name.trim().toLocaleLowerCase() ===
+                candidate.suggestion.name.trim().toLocaleLowerCase() &&
+              (place.locality ?? "").trim().toLocaleLowerCase() ===
+                (candidate.suggestion.locality ?? "")
+                  .trim()
+                  .toLocaleLowerCase(),
+          );
+      const place =
+        existing ??
+        ({
+          ...candidate.suggestion,
+          id: `place-${candidate.suggestion.name
+            .toLocaleLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "")}`,
+          coordinates: null,
+          waterContact: false,
+          accessibility: [],
+          origin: "chatgpt",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        } as SavedPlace);
+      trip = {
+        ...trip,
+        version: trip.version + 1,
+        places: existing ? trip.places : [...trip.places, place],
+        itinerary: [
+          ...trip.itinerary,
+          {
+            id: crypto.randomUUID(),
+            placeId: place.id,
+            date: candidate.date,
+            startTime: candidate.startTime,
+            durationMinutes: candidate.durationMinutes,
+            notes: "",
+            status: "confirmed",
+            order: trip.itinerary.filter(
+              (item: { date: string }) => item.date === candidate.date,
+            ).length,
+          },
+        ],
       };
     } else if (mutation.type === "add-itinerary-item") {
       trip = {

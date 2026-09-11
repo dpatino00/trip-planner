@@ -1,25 +1,27 @@
 import type { SavedPlace } from "@/lib/types";
-import type { ScheduledItem } from "@/lib/chat/schema";
+import type { ScheduleCandidate } from "@/lib/chat/schema";
 
 export type ScheduleStatus =
   "idle" | "adding" | "saved" | "duplicate" | "conflict" | "error";
 
 interface ScheduleCardProps {
-  place: SavedPlace;
-  scheduledItem: ScheduledItem;
+  place: SavedPlace | null;
+  candidate: ScheduleCandidate;
   status: ScheduleStatus;
   online: boolean;
   onConfirm: () => void;
 }
 
-// @spec CHAT-UI-018, CHAT-UI-019
+// @spec CHAT-UI-018, CHAT-UI-019, CHAT-UI-020, CHAT-UI-021, CHAT-UI-022
 export function ScheduleCard({
   place,
-  scheduledItem,
+  candidate,
   status,
   online,
   onConfirm,
 }: ScheduleCardProps) {
+  const displayPlace = place ?? candidate.suggestion;
+  if (!displayPlace) return null;
   const complete = status === "saved";
   const label =
     status === "saved"
@@ -32,13 +34,16 @@ export function ScheduleCard({
   return (
     <article
       className="suggestion-card schedule-card"
-      aria-label={`Schedule ${place.name}`}
+      aria-label={`Schedule ${displayPlace.name}`}
     >
       <p className="eyebrow">PLAN CONFIRMATION</p>
-      <h3>{place.name}</h3>
+      <h3>{displayPlace.name}</h3>
+      {candidate.suggestion ? (
+        <p className="verified">New trip idea · details not verified</p>
+      ) : null}
       <p>
-        {scheduledItem.date} · {scheduledItem.startTime} ·{" "}
-        {scheduledItem.durationMinutes} minutes
+        {candidate.date} · {candidate.startTime} · {candidate.durationMinutes}{" "}
+        minutes
       </p>
       {label ? (
         <p className={status === "error" ? "error" : "verified"}>{label}</p>
