@@ -19,10 +19,14 @@ traveler explicitly asks about them. Ask can resolve one explicit request to
 schedule an existing saved idea or one newly named idea with a date and time
 into a reviewable confirmation card; only traveler confirmation creates the
 itinerary item and, when needed, the saved idea. A missing duration defaults to
-two hours. Short follow-up replies continue the active scheduling request, so
+two hours. Natural timed-add wording enters the same scheduling flow, and an
+unqualified weekday resolves to the matching day inside the trip window. Short
+follow-up replies continue the active scheduling request, so
 the traveler can provide the date, time, duration, or saved idea across several
 turns without restarting. Saved ideas named in that scheduling thread are
-prioritized into the bounded model context. A one-message Create cards control
+prioritized into the bounded model context. The traveler may confirm a visible
+schedule card either with its button or a concise chat confirmation; both use
+the same authenticated mutation. A one-message Create cards control
 turns up to twelve explicitly named places, events, or activities from
 free-form prose, lists, or tables into saved matches, new cards, and unresolved
 names without relying on trigger wording. Only an explicit individual or bulk

@@ -286,6 +286,54 @@ it("continues a multi-turn saved schedule when the model omits its candidate", a
   );
 });
 
+// @spec CHAT-BE-043, CHAT-BE-044, CHAT-BE-045
+it("derives an in-trip schedule from natural timed-add wording", async () => {
+  const ironside = {
+    ...makeTripV2().places[0],
+    id: "place-ironside",
+    name: "Ironside Fish & Oyster",
+    locality: "Little Italy, San Diego",
+  };
+  const trip = makeTripV2({ places: [...makeTripV2().places, ironside] });
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Ready to confirm.",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduledItem: null,
+      },
+    }),
+  };
+  const { POST } = await setup({ model, trip });
+
+  const response = await POST(
+    chatRequest(
+      {
+        message:
+          "Ironside Fish & Oyster: add this for thursday night at 9 PM fro 2 hours",
+        history: [],
+      },
+      { token: SHARE_TOKEN, contractVersion: 5 },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    scheduleCandidate: {
+      savedPlaceId: "place-ironside",
+      date: "2026-09-17",
+      startTime: "21:00",
+      durationMinutes: 120,
+    },
+  });
+  expect(model.generate).toHaveBeenCalledWith(
+    expect.objectContaining({ mode: "schedule-new" }),
+  );
+});
+
 // @spec CHAT-BE-035
 it("drops a schedule candidate outside the trip range", async () => {
   const model: TripChatModel = {

@@ -2,7 +2,10 @@
 
 import { expect, it, vi } from "vitest";
 
-import { hasScheduleIntent } from "@/lib/chat/intent";
+import {
+  hasScheduleConfirmationIntent,
+  hasScheduleIntent,
+} from "@/lib/chat/intent";
 import { createOpenAITripChatModel } from "@/lib/chat/openai";
 import { makeTripV2 } from "./fixtures";
 
@@ -230,6 +233,21 @@ it.each([
     ]),
   ).toBe(true);
 });
+
+// @spec CHAT-BE-044
+it("recognizes a timed add request without plan-specific wording", () => {
+  expect(
+    hasScheduleIntent(
+      "Ironside Fish & Oyster: add this for thursday night at 9 PM fro 2 hours",
+    ),
+  ).toBe(true);
+});
+
+// @spec CHAT-UI-024
+it.each(["confirm", "confirm it", "yes", "yep", "do it", "please do"])(
+  "recognizes concise schedule confirmation %j",
+  (message) => expect(hasScheduleConfirmationIntent(message)).toBe(true),
+);
 
 // @spec CHAT-DATA-001, CHAT-DATA-005, CHAT-BE-001, CHAT-BE-029, CHAT-BE-030
 it("instructs explicit-card mode to create only named place, event, or activity cards", async () => {

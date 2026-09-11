@@ -211,6 +211,8 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-BE-041**: While recent Ask history contains an unresolved schedule request, when the traveler supplies or confirms a missing name, date, time, duration, or confirmation in a follow-up message, embedded Ask shall continue version-5 schedule mode and combine the scheduling details across that history without requesting an already supplied detail again.
 - [x] **CHAT-BE-042**: When a version-5 scheduling thread names an authoritative saved idea outside the ordinary bounded-context slice, embedded Ask shall prioritize that exact named idea into the bounded context so the model can return its authoritative saved-place ID.
 - [x] **CHAT-BE-043**: When a version-5 scheduling thread's traveler-authored turns contain exactly one full authoritative saved-idea name, one inclusive ISO or relative date, and one local start time, if the model omits a schedule candidate, embedded Ask shall return a non-mutating candidate for that saved idea using the supplied duration or the 120-minute default.
+- [x] **CHAT-BE-044**: When a version-5 message asks to add one named idea and contains both a date or weekday and a local time, embedded Ask shall select schedule mode even when the message does not say “to the plan,” “to the itinerary,” or “to the trip.”
+- [x] **CHAT-BE-045**: When a version-5 scheduling request contains an unqualified weekday, embedded Ask shall resolve it to the first matching weekday on or after the later of the destination-local current date and the trip start date, provided that date is inside the inclusive trip range.
 
 ## Embedded Ask Interface
 
@@ -237,6 +239,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-UI-021**: When a traveler confirms a version-5 schedule candidate while online, the browser shall issue one versioned confirm-chat-schedule mutation and shall retain retryable conflict or error state without duplicating the itinerary item.
 - [x] **CHAT-UI-022**: When a version-5 schedule confirmation succeeds, the browser shall update shared trip state and the offline trip snapshot while remaining in Ask with success feedback.
 - [x] **CHAT-UI-023**: When the traveler opens Plan after a successful version-5 schedule confirmation, the interface shall display the confirmed itinerary item on its scheduled date.
+- [x] **CHAT-UI-024**: While one uncompleted schedule confirmation card is visible, when the traveler submits a concise confirmation in Ask, the browser shall invoke the card's authenticated schedule mutation without another model request and shall display the resulting status on that card.
 
 ## Optimization Proposals
 

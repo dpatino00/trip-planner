@@ -174,6 +174,62 @@ it("renders a schedule confirmation and adds its exact itinerary values only aft
   expect(await within(card).findByText("Added to plan")).toBeVisible();
 });
 
+// @spec CHAT-UI-024
+it("uses a typed confirmation to add the latest pending schedule card", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({
+      message: "Ready to confirm.",
+      savedPlaceIds: [],
+      suggestions: [],
+      unresolvedPlaceNames: [],
+      scheduleCandidate: {
+        savedPlaceId: "place-tacos",
+        suggestion: null,
+        date: "2026-09-17",
+        startTime: "21:00",
+        durationMinutes: 120,
+      },
+      tripVersion: 1,
+    }),
+  );
+  const onConfirmSchedule = vi.fn().mockResolvedValue({ status: "saved" });
+  render(
+    <TripChat
+      token={SHARE_TOKEN}
+      trip={makeTripV2()}
+      online
+      onAddSuggestion={vi.fn()}
+      onConfirmSchedule={onConfirmSchedule}
+      onViewSavedPlace={vi.fn()}
+    />,
+  );
+
+  const composer = screen.getByLabelText("Ask about this trip");
+  await waitFor(() => expect(composer).toBeEnabled());
+  fireEvent.change(composer, {
+    target: { value: "Add Tacos Thursday at 9 PM for 2 hours" },
+  });
+  fireEvent.keyDown(composer, { key: "Enter" });
+
+  const card = await screen.findByRole("article", {
+    name: "Schedule Oscar's Mexican Seafood",
+  });
+  fireEvent.change(composer, { target: { value: "confirm" } });
+  fireEvent.keyDown(composer, { key: "Enter" });
+
+  await waitFor(() =>
+    expect(onConfirmSchedule).toHaveBeenCalledWith({
+      savedPlaceId: "place-tacos",
+      suggestion: null,
+      date: "2026-09-17",
+      startTime: "21:00",
+      durationMinutes: 120,
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(await within(card).findByText("Added to plan")).toBeVisible();
+});
+
 // @spec CHAT-DATA-013, CHAT-UI-020, CHAT-UI-021, CHAT-UI-022
 it("renders one confirmation that can save and schedule a new named place", async () => {
   const zooSuggestion = {

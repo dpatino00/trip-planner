@@ -472,6 +472,11 @@ date, and a local start time, the handler returns the reviewable saved-place
 candidate even if the model omits it. The same two-hour default applies when no
 duration was supplied. This fallback changes no trip state and never creates a
 new idea; confirmation remains a separate authenticated mutation.
+Natural requests that use `add` with both a date or weekday and a local time
+select schedule mode even when they omit “to the plan.” For an unqualified
+weekday, deterministic resolution starts at the later of the destination-local
+current date and the trip start date, selecting the first matching weekday in
+the inclusive trip window. Explicit `next` weekdays retain next-week semantics.
 Version four, version three, version two, and headerless callers retain their
 current response shapes.
 
@@ -810,7 +815,9 @@ the authenticated versioned `confirm-chat-schedule` mutation with empty notes
 and confirmed status. Existing retry and failure behavior applies. Success
 updates SWR and the offline trip snapshot while Ask remains active, so Plan is
 current when opened. The card does not assert availability or check timed
-overlaps.
+overlaps. While a pending schedule card is visible, a concise confirmation such
+as “confirm,” “yes,” or “do it” invokes that same mutation directly without
+sending another model request.
 
 When an assistant response contains more than one new suggestion, Ask also shows
 **Add all new**. Activating it sends one atomic batch mutation and marks each

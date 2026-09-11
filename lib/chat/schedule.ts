@@ -31,7 +31,7 @@ function dateAtOffset(today: string, offset: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function scheduleDate(text: string, today: string) {
+function scheduleDate(text: string, today: string, tripStartDate: string) {
   const isoDates = [...text.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)];
   if (isoDates.length > 0) return isoDates.at(-1)?.[0] ?? null;
 
@@ -58,11 +58,15 @@ function scheduleDate(text: string, today: string) {
   ];
   const match = weekdayMatches.at(-1);
   if (!match) return null;
-  const currentDay = new Date(`${today}T00:00:00Z`).getUTCDay();
   const targetDay = weekdays.indexOf(match[2].toLocaleLowerCase());
+  if (!match[1]) {
+    const anchor = today > tripStartDate ? today : tripStartDate;
+    const anchorDay = new Date(`${anchor}T00:00:00Z`).getUTCDay();
+    return dateAtOffset(anchor, (targetDay - anchorDay + 7) % 7);
+  }
+  const currentDay = new Date(`${today}T00:00:00Z`).getUTCDay();
   const baseOffset = (targetDay - currentDay + 7) % 7;
-  const offset = match[1] ? baseOffset + 7 : baseOffset;
-  return dateAtOffset(today, offset);
+  return dateAtOffset(today, baseOffset + 7);
 }
 
 function scheduleStartTime(text: string) {
@@ -122,7 +126,11 @@ export function resolveSavedScheduleFromConversation(options: {
   const place =
     exactMentionedPlace(options.trip.places, travelerText) ??
     exactMentionedPlace(options.trip.places, conversationText);
-  const date = scheduleDate(travelerText, options.today);
+  const date = scheduleDate(
+    travelerText,
+    options.today,
+    options.trip.startDate,
+  );
   const startTime = scheduleStartTime(travelerText);
   const durationMinutes = scheduleDuration(travelerText);
   if (!place || !date || !startTime || durationMinutes === null) return null;

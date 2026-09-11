@@ -15,6 +15,7 @@ import {
   tripChatResponseV5Schema,
   type ScheduleCandidate,
 } from "@/lib/chat/schema";
+import { hasScheduleConfirmationIntent } from "@/lib/chat/intent";
 import { tripCopy } from "@/lib/ui/copy";
 import type { SuggestedPlace, TripDocument } from "@/lib/types";
 
@@ -126,6 +127,36 @@ export function TripChat({
       unresolvedPlaceNames: [],
       scheduleCandidate: null,
     };
+    const pendingSchedule = messages
+      .slice()
+      .reverse()
+      .find(
+        (item) =>
+          item.role === "assistant" &&
+          item.scheduleCandidate !== null &&
+          !["adding", "saved", "duplicate"].includes(
+            scheduleStatuses[item.id] ?? "idle",
+          ),
+      );
+    if (
+      pendingSchedule?.scheduleCandidate &&
+      hasScheduleConfirmationIntent(message)
+    ) {
+      setMessages((current) => [...current, userMessage].slice(-12));
+      setComposer("");
+      setCreateCards(false);
+      setError("");
+      setLoading(true);
+      try {
+        await confirmSchedule(
+          pendingSchedule.id,
+          pendingSchedule.scheduleCandidate,
+        );
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     const history = buildChatHistory(messages);
     const requestCards = createCards;
     setMessages((current) => [...current, userMessage].slice(-12));

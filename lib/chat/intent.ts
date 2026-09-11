@@ -13,12 +13,18 @@ const scheduleRequest =
   /\b(?:schedule|put)\b|\badd\b[\s\S]{0,60}\b(?:to|into)\s+(?:my\s+|the\s+)?(?:plan|itinerary)\b/i;
 const addToTripRequest =
   /\badd\b[\s\S]{0,60}\b(?:to|into)\s+(?:my\s+|the\s+)?trip\b/i;
-const scheduleDetail =
-  /\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b|\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b/i;
+const scheduleDateDetail =
+  /\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b/i;
+const scheduleTimeDetail =
+  /\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b|\b(?:[01]\d|2[0-3]):[0-5]\d\b/i;
+const scheduleDetail = new RegExp(
+  `${scheduleDateDetail.source}|${scheduleTimeDetail.source}`,
+  "i",
+);
 const scheduleFollowUpDetail =
-  /\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b|\b\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?)\b|\b(?:confirm|confirmed|yes|yep|correct|do it|please do)\b|\b(?:idea|place)\b[\s\S]{0,40}\b(?:already\s+)?(?:exists|saved)\b/i;
+  /\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b|\b\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?)\b|\b(?:confirm|confirmed|yes|yep|correct|do it|please do|try again)\b|\b(?:idea|place)\b[\s\S]{0,40}\b(?:already\s+)?(?:exists|saved)\b|\b(?:that(?:'s| is) what i meant|i don'?t see it)\b/i;
 const unresolvedScheduleReply =
-  /\b(?:schedule|scheduling|schedule card|plan confirmation)\b[\s\S]{0,160}\b(?:date|time|duration|hours?|name|idea|confirm|finish|need)\b|\b(?:date|time|duration|start time|saved idea|idea name)\b[\s\S]{0,160}\b(?:schedule|card|place|finish|need|use)\b/i;
+  /\b(?:schedule|scheduled|scheduling|schedule card|plan confirmation|reviewable card|planner|plan workflow|itinerary|slot)\b[\s\S]{0,200}\b(?:date|time|duration|hours?|name|idea|confirm|finish|need|meant|prepare|place|add|save)\b|\b(?:date|time|duration|start time|saved idea|idea name)\b[\s\S]{0,200}\b(?:schedule|card|place|finish|need|use|prepare|add|save)\b/i;
 
 type IntentHistoryItem = {
   role: "user" | "assistant";
@@ -52,8 +58,31 @@ export function hasExplicitLinkEnrichmentIntent(message: string) {
 export function hasExplicitScheduleIntent(message: string) {
   return (
     scheduleRequest.test(message) ||
-    (addToTripRequest.test(message) && scheduleDetail.test(message))
+    (addToTripRequest.test(message) && scheduleDetail.test(message)) ||
+    (directAddWords.test(message) &&
+      scheduleDateDetail.test(message) &&
+      scheduleTimeDetail.test(message))
   );
+}
+
+// @spec CHAT-UI-024
+export function hasScheduleConfirmationIntent(message: string) {
+  const normalized = message
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[.!]+$/g, "")
+    .replace(/\s+/g, " ");
+  return new Set([
+    "confirm",
+    "confirm it",
+    "yes",
+    "yep",
+    "do it",
+    "please do",
+    "add it",
+    "looks good",
+    "that works",
+  ]).has(normalized);
 }
 
 // @spec CHAT-BE-041
