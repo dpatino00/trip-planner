@@ -2,6 +2,7 @@
 
 import { expect, it, vi } from "vitest";
 
+import { hasScheduleIntent } from "@/lib/chat/intent";
 import { createOpenAITripChatModel } from "@/lib/chat/openai";
 import { makeTripV2 } from "./fixtures";
 
@@ -168,6 +169,66 @@ it("allows one web search and instructs a two-hour default for new schedule cand
   const request = JSON.stringify(parse.mock.calls[0][0]);
   expect(request).toMatch(/schedule-new/i);
   expect(request).toMatch(/120 minutes/i);
+});
+
+// @spec CHAT-BE-041
+it("keeps a recent unresolved scheduling thread in schedule mode", async () => {
+  const parse = vi.fn().mockResolvedValue({
+    status: "completed",
+    output_parsed: {
+      message: "Ready to confirm.",
+      savedPlaceIds: [],
+      savedPlaceSources: [],
+      suggestions: [],
+      unresolvedPlaceNames: [],
+      scheduledItem: null,
+    },
+    output: [],
+  });
+  const model = createOpenAITripChatModel({
+    client: { responses: { parse } },
+    model: "gpt-test",
+  });
+
+  await model.generate({
+    message: "2 hours",
+    history: [
+      {
+        role: "user",
+        content: "Put Bali Hai Restaurant on the plan next Thursday at 9 PM",
+      },
+      {
+        role: "assistant",
+        content: "What duration should I use to finish the schedule card?",
+      },
+    ],
+    context: {} as never,
+  });
+
+  const request = JSON.stringify(parse.mock.calls[0][0]);
+  expect(request).toMatch(/Request mode: schedule/i);
+  expect(request).toMatch(/combine.*current reply.*recent conversation/i);
+  expect(request).toMatch(/do not request.*already supplied/i);
+});
+
+// @spec CHAT-BE-041
+it.each([
+  "next Thursday please",
+  "2026-09-17",
+  "2 hours",
+  "confirm",
+  "the idea already exists",
+  "Bali Hai Restaurant",
+])("recognizes scheduling follow-up %j", (message) => {
+  expect(
+    hasScheduleIntent(message, [
+      {
+        role: "assistant",
+        content:
+          "I still need the exact saved idea name to finish the schedule card.",
+      },
+    ]),
+  ).toBe(true);
 });
 
 // @spec CHAT-DATA-001, CHAT-DATA-005, CHAT-BE-001, CHAT-BE-029, CHAT-BE-030

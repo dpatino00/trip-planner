@@ -4,7 +4,7 @@ import { zodTextFormat } from "openai/helpers/zod";
 import {
   hasExplicitAdditionIntent,
   hasExplicitLinkEnrichmentIntent,
-  hasExplicitScheduleIntent,
+  hasScheduleIntent,
 } from "@/lib/chat/intent";
 import type { TripChatModel } from "@/lib/chat/model";
 import { TripChatInvalidOutputError } from "@/lib/chat/model";
@@ -38,6 +38,7 @@ In card mode, create cards only for the first twelve named places, events, or ac
 In link mode, the traveler explicitly requests a link, URL, website, or source for one or more named saved ideas. Return only matching authoritative IDs in savedPlaceIds, return no new suggestions or unresolvedPlaceNames, and invoke no more than one web search for all missing links. For each credible exact match whose saved context has no source URL, copy an exact HTTPS URL from the current search sources into savedPlaceSources. Do not return a source candidate for an idea not included in savedPlaceIds or for one that already has a source URL. Do not claim that a source was saved because the server validates and persists it after generation.
 In schedule mode, resolve exactly one named saved idea plus a date, local start time, and duration into scheduledItem. Use the supplied destination-local today for relative dates. Return scheduledItem with the authoritative savedPlaceId and null suggestion only when the named saved idea has one exact useful match and all values are present and within the trip dates; otherwise return null and ask a concise follow-up. Return empty savedPlaceIds, savedPlaceSources, suggestions, and unresolvedPlaceNames. Do not use web search or claim availability, reservations, or that the itinerary changed; the traveler must confirm the card.
 In schedule-new mode, resolve exactly one named idea plus a date and local start time into scheduledItem. Use the supplied destination-local today for relative dates. Use the traveler's duration when supplied and otherwise use 120 minutes. Prefer one exact saved match, returning its authoritative savedPlaceId and null suggestion. When there is no saved match, use one web search for the named idea and return null savedPlaceId plus one identifiable suggestion, copying an exact credible HTTPS source into sourceUrl when available. Return null and ask a concise follow-up when the name, date, or time is missing or ambiguous. Return empty savedPlaceIds, savedPlaceSources, suggestions, and unresolvedPlaceNames. Do not claim availability, reservations, or that the itinerary changed; the traveler must confirm the card.
+For a schedule-mode follow-up, combine the current reply with every scheduling detail already supplied in the recent conversation. Do not request a name, date, time, or duration that the traveler already supplied. When the authoritative context contains an exact saved-place name from the scheduling thread, use that place's ID instead of claiming that the saved idea cannot be resolved.
 For every suggestion, write a concise one- or two-sentence summary explaining what the trip idea is, why someone might choose it, and its relevant character, cuisine, or experience. Use unique normalized lower-case tags such as theater, mexican, seafood, casual, event, or outdoor. Prefer an official venue, event, park, museum, government, or tourism page. Do not claim other live venue or event facts.`;
 
 function webSearchSources(
@@ -74,7 +75,7 @@ export function createOpenAITripChatModel(options: {
         input.mode ??
         (hasExplicitLinkEnrichmentIntent(input.message)
           ? "link"
-          : hasExplicitScheduleIntent(input.message)
+          : hasScheduleIntent(input.message, input.history)
             ? "schedule"
             : hasExplicitAdditionIntent(input.message)
               ? "addition"

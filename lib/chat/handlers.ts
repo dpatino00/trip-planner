@@ -2,7 +2,7 @@ import { buildTripChatContext } from "@/lib/chat/context";
 import {
   hasExplicitAdditionIntent,
   hasExplicitLinkEnrichmentIntent,
-  hasExplicitScheduleIntent,
+  hasScheduleIntent,
   hasExplicitSavedPlaceLookupIntent,
   normalizedPlaceKey,
 } from "@/lib/chat/intent";
@@ -295,7 +295,6 @@ export function createTripChatHandler({
     try {
       const tripKey = tripKeyForToken(token);
       const trip = migrateTripDocument(stored.trip);
-      const context = buildTripChatContext(trip, clock());
       const explicitAddition = hasExplicitAdditionIntent(parsed.data.message);
       const cardMode =
         currentContract &&
@@ -307,7 +306,7 @@ export function createTripChatHandler({
         !cardMode &&
         !linkMode &&
         (contractV4 || contractV5) &&
-        hasExplicitScheduleIntent(parsed.data.message);
+        hasScheduleIntent(parsed.data.message, parsed.data.history);
       const additionMode =
         !cardMode &&
         !linkMode &&
@@ -329,6 +328,13 @@ export function createTripChatHandler({
             : additionMode
               ? "addition"
               : "standard";
+      const schedulingThread = scheduleMode
+        ? [
+            ...parsed.data.history.map((item) => item.content),
+            parsed.data.message,
+          ].join("\n")
+        : "";
+      const context = buildTripChatContext(trip, clock(), schedulingThread);
       const generated = await withTimeout(
         (signal) =>
           model.generate({

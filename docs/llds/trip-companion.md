@@ -457,6 +457,14 @@ authoritative saved match and otherwise may use one exact generated suggestion
 grounded by the request's bounded web search. If the traveler supplies no
 duration, the candidate uses 120 minutes. It performs no repository update and
 asks for clarification when the name, date, or time is incomplete or ambiguous.
+When the recent conversation contains an unresolved schedule request, a short
+reply that supplies or confirms a name, date, time, duration, or confirmation
+continues schedule mode. The model combines the current reply with the recent
+conversation and does not request a detail already supplied there. Before the
+normal count and serialized-size caps are applied, context construction
+prioritizes authoritative places whose normalized names occur in the current
+scheduling thread. This keeps an explicitly named saved idea resolvable even
+when it was inserted after the ordinary context slice.
 Version four, version three, version two, and headerless callers retain their
 current response shapes.
 

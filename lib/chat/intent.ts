@@ -15,6 +15,15 @@ const addToTripRequest =
   /\badd\b[\s\S]{0,60}\b(?:to|into)\s+(?:my\s+|the\s+)?trip\b/i;
 const scheduleDetail =
   /\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b|\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b/i;
+const scheduleFollowUpDetail =
+  /\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b|\b\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?)\b|\b(?:confirm|confirmed|yes|yep|correct|do it|please do)\b|\b(?:idea|place)\b[\s\S]{0,40}\b(?:already\s+)?(?:exists|saved)\b/i;
+const unresolvedScheduleReply =
+  /\b(?:schedule|scheduling|schedule card|plan confirmation)\b[\s\S]{0,160}\b(?:date|time|duration|hours?|name|idea|confirm|finish|need)\b|\b(?:date|time|duration|start time|saved idea|idea name)\b[\s\S]{0,160}\b(?:schedule|card|place|finish|need|use)\b/i;
+
+type IntentHistoryItem = {
+  role: "user" | "assistant";
+  content: string;
+};
 
 // @spec CHAT-BE-010, CHAT-BE-020
 export function hasExplicitSavedPlaceLookupIntent(message: string) {
@@ -44,6 +53,28 @@ export function hasExplicitScheduleIntent(message: string) {
   return (
     scheduleRequest.test(message) ||
     (addToTripRequest.test(message) && scheduleDetail.test(message))
+  );
+}
+
+// @spec CHAT-BE-041
+export function hasScheduleIntent(
+  message: string,
+  history: IntentHistoryItem[] = [],
+) {
+  if (hasExplicitScheduleIntent(message)) return true;
+  const latestAssistant = history
+    .slice()
+    .reverse()
+    .find((item) => item.role === "assistant");
+  if (
+    !latestAssistant ||
+    !unresolvedScheduleReply.test(latestAssistant.content)
+  )
+    return false;
+  return (
+    scheduleFollowUpDetail.test(message) ||
+    scheduleDetail.test(message) ||
+    titledPlaceName.test(message)
   );
 }
 

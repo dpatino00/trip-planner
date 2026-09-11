@@ -48,12 +48,42 @@ function compactText(value: string, maximum: number) {
   return value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`;
 }
 
-// @spec CHAT-DATA-003, CHAT-BE-011
+function normalizedSearchText(value: string) {
+  return value
+    .normalize("NFKD")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function prioritizeMentionedPlaces(
+  places: TripDocument["places"],
+  relevantText: string,
+) {
+  const searchable = ` ${normalizedSearchText(relevantText)} `;
+  const mentioned = places.filter((place) => {
+    const name = normalizedSearchText(place.name);
+    return name.length > 0 && searchable.includes(` ${name} `);
+  });
+  if (mentioned.length === 0) return places;
+  const mentionedIds = new Set(mentioned.map((place) => place.id));
+  return [
+    ...mentioned,
+    ...places.filter((place) => !mentionedIds.has(place.id)),
+  ];
+}
+
+// @spec CHAT-DATA-003, CHAT-BE-011, CHAT-BE-042
 export function buildTripChatContext(
   trip: TripDocument,
   now = new Date(),
+  relevantText = "",
 ): TripChatContext {
   const names = new Map(trip.places.map((place) => [place.id, place.name]));
+  const prioritizedPlaces = prioritizeMentionedPlaces(
+    trip.places,
+    relevantText,
+  );
   const pending = trip.proposals.find(
     (proposal) => proposal.status === "pending",
   );
@@ -66,7 +96,7 @@ export function buildTripChatContext(
       ...trip.preferences,
       notes: compactText(trip.preferences.notes, 500),
     },
-    places: trip.places.slice(0, 20).map((place) => ({
+    places: prioritizedPlaces.slice(0, 20).map((place) => ({
       id: place.id,
       name: place.name,
       summary: compactText(place.summary, 240),

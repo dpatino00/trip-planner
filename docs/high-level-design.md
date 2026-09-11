@@ -1,7 +1,7 @@
 # Conversational Trip Companion — High-Level Design
 
 **Created**: 2026-09-01
-**Last updated**: 2026-09-10
+**Last updated**: 2026-09-11
 
 ## Problem Statement
 
@@ -19,11 +19,14 @@ traveler explicitly asks about them. Ask can resolve one explicit request to
 schedule an existing saved idea or one newly named idea with a date and time
 into a reviewable confirmation card; only traveler confirmation creates the
 itinerary item and, when needed, the saved idea. A missing duration defaults to
-two hours. A one-message Create cards control turns
-up to twelve explicitly named places, events, or activities from free-form
-prose, lists, or tables into saved matches, new cards, and unresolved names
-without relying on trigger wording. Only an explicit individual or bulk Add to
-trip action adds a new idea to the shared plan. A traveler may explicitly ask
+two hours. Short follow-up replies continue the active scheduling request, so
+the traveler can provide the date, time, duration, or saved idea across several
+turns without restarting. Saved ideas named in that scheduling thread are
+prioritized into the bounded model context. A one-message Create cards control
+turns up to twelve explicitly named places, events, or activities from
+free-form prose, lists, or tables into saved matches, new cards, and unresolved
+names without relying on trigger wording. Only an explicit individual or bulk
+Add to trip action adds a new idea to the shared plan. A traveler may explicitly ask
 Ask to find a link for a named saved idea that lacks one; the server may attach
 only an exact HTTPS reference found in that request's bounded web search. The
 shared trip remains the visual and durable source of truth. A private Custom

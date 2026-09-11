@@ -214,6 +214,87 @@ it("returns a default-duration schedule candidate for a new named place without 
   expect(update).not.toHaveBeenCalled();
 });
 
+// @spec CHAT-BE-041, CHAT-BE-042
+it("continues a multi-turn schedule and prioritizes its saved idea into bounded context", async () => {
+  const fillerPlaces = Array.from(
+    { length: 24 },
+    (_, index) => ({
+      ...makeTripV2().places[0],
+      id: `place-filler-${index}`,
+      name: `Filler Place ${index}`,
+    }),
+  );
+  const baliHai = {
+    ...makeTripV2().places[0],
+    id: "place-bali-hai",
+    name: "Bali Hai Restaurant",
+    locality: "Shelter Island, CA",
+  };
+  const trip = makeTripV2({ places: [...fillerPlaces, baliHai] });
+  const model: TripChatModel = {
+    generate: vi.fn().mockResolvedValue({
+      output: {
+        message: "Ready to confirm.",
+        savedPlaceIds: [],
+        savedPlaceSources: [],
+        suggestions: [],
+        unresolvedPlaceNames: [],
+        scheduledItem: {
+          savedPlaceId: "place-bali-hai",
+          suggestion: null,
+          date: "2026-09-17",
+          startTime: "21:00",
+          durationMinutes: 120,
+        },
+      },
+    }),
+  };
+  const { POST } = await setup({ model, trip });
+
+  const response = await POST(
+    chatRequest(
+      {
+        message: "2 hours",
+        history: [
+          {
+            role: "user",
+            content:
+              "Put Bali Hai Restaurant on the plan next Thursday at 9 PM",
+          },
+          {
+            role: "assistant",
+            content: "What duration should I use to finish the schedule card?",
+          },
+        ],
+      },
+      { token: SHARE_TOKEN, contractVersion: 5 },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    scheduleCandidate: {
+      savedPlaceId: "place-bali-hai",
+      date: "2026-09-17",
+      startTime: "21:00",
+      durationMinutes: 120,
+    },
+  });
+  expect(model.generate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      mode: "schedule-new",
+      context: expect.objectContaining({
+        places: expect.arrayContaining([
+          expect.objectContaining({
+            id: "place-bali-hai",
+            name: "Bali Hai Restaurant",
+          }),
+        ]),
+      }),
+    }),
+  );
+});
+
 // @spec CHAT-BE-035
 it("drops a schedule candidate outside the trip range", async () => {
   const model: TripChatModel = {
