@@ -213,6 +213,7 @@ active gap introduced or changed by the approved conversational design.
 - [x] **CHAT-BE-043**: When a version-5 scheduling thread's traveler-authored turns contain exactly one full authoritative saved-idea name, one inclusive ISO or relative date, and one local start time, if the model omits a schedule candidate, embedded Ask shall return a non-mutating candidate for that saved idea using the supplied duration or the 120-minute default.
 - [x] **CHAT-BE-044**: When a version-5 message asks to add one named idea and contains both a date or weekday and a local time, embedded Ask shall select schedule mode even when the message does not say “to the plan,” “to the itinerary,” or “to the trip.”
 - [x] **CHAT-BE-045**: When a version-5 scheduling request contains an unqualified weekday, embedded Ask shall resolve it to the first matching weekday on or after the later of the destination-local current date and the trip start date, provided that date is inside the inclusive trip range.
+- [x] **CHAT-BE-046**: When a one-shot version-5 scheduling request contains a unique saved-idea shorthand whose first and last name tokens identify one authoritative place, embedded Ask shall return that saved-place schedule candidate without requiring a clarification turn; an omitted duration shall remain 120 minutes.
 
 ## Embedded Ask Interface
 

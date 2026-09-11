@@ -286,7 +286,7 @@ it("continues a multi-turn saved schedule when the model omits its candidate", a
   );
 });
 
-// @spec CHAT-BE-043, CHAT-BE-044, CHAT-BE-045
+// @spec CHAT-BE-043, CHAT-BE-044, CHAT-BE-045, CHAT-BE-046
 it("derives an in-trip schedule from natural timed-add wording", async () => {
   const ironside = {
     ...makeTripV2().places[0],
@@ -312,8 +312,7 @@ it("derives an in-trip schedule from natural timed-add wording", async () => {
   const response = await POST(
     chatRequest(
       {
-        message:
-          "Ironside Fish & Oyster: add this for thursday night at 9 PM fro 2 hours",
+        message: "Please add the Ironside oyster for 9 PM september 17",
         history: [],
       },
       { token: SHARE_TOKEN, contractVersion: 5 },

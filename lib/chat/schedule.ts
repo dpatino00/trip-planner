@@ -18,11 +18,26 @@ function exactMentionedPlace(places: TripDocument["places"], text: string) {
         candidate.name.length > 0 && searchable.includes(` ${candidate.name} `),
     )
     .sort((left, right) => right.name.length - left.name.length);
-  if (matches.length === 0) return null;
-  const longest = matches[0];
-  return matches.every((candidate) => longest.name.includes(candidate.name))
-    ? longest.place
-    : null;
+  if (matches.length > 0) {
+    const longest = matches[0];
+    if (matches.every((candidate) => longest.name.includes(candidate.name))) {
+      return longest.place;
+    }
+  }
+
+  // Accept a clear conversational shorthand when the first and last
+  // meaningful name tokens identify exactly one saved place (for example,
+  // “Ironside oyster” for “Ironside Fish & Oyster”).
+  const searchableTokens = new Set(normalizedWords(text).split(" "));
+  const aliases = places.filter((place) => {
+    const tokens = normalizedWords(place.name).split(" ");
+    return (
+      tokens.length >= 2 &&
+      searchableTokens.has(tokens[0]) &&
+      searchableTokens.has(tokens.at(-1) ?? "")
+    );
+  });
+  return aliases.length === 1 ? aliases[0] : null;
 }
 
 function dateAtOffset(today: string, offset: number) {
